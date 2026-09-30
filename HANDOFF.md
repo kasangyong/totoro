@@ -1,7 +1,7 @@
 # 배팅 할래 말래 · 인수인계 문서
 
-작성: 2026-09-30 · 작성 위치: `C:\Users\SSAFY\Desktop\lee\game` (git 저장소 아님)
-목적: 다른 컴퓨터에서 이 문서만 읽고 지금까지 만든 것을 그대로 다시 만들고, 다음 단계(방·카드 게임)를 이어서 구현하기.
+작성: 2026-09-30 · 저장소: https://github.com/kasangyong/totoro (master)
+목적: 다른 컴퓨터에서 이 저장소를 받아 지금까지 만든 것을 그대로 이어 가고, 다음 단계(방·카드 게임)를 구현하기.
 
 ---
 
@@ -16,7 +16,10 @@
 
 ## 2. 산출물 위치
 
-### 2-1. 로컬 파일 (`C:\Users\SSAFY\Desktop\lee\game`)
+### 2-1. 저장소 파일 (https://github.com/kasangyong/totoro)
+```bash
+git clone https://github.com/kasangyong/totoro
+```
 | 파일 | 내용 |
 |---|---|
 | `crash-demo.html` | Crash 단독 데모 (원본) |
@@ -30,7 +33,10 @@
 | `site/index.html` | 로비 |
 | `site/crash.html` 등 6개 | build.js가 만든 결과물 (직접 고치지 말 것) |
 
-수정 흐름: `*-demo.html` 고침 → `node site/build.js` → 사이트 다시 게시.
+수정 흐름: `*-demo.html` 고침 → 저장소 맨 위에서 `node site/build.js` → 커밋·푸시 → (아티팩트를 쓰면) 사이트 다시 게시.
+- 처음 만든 곳은 `C:\Users\SSAFY\Desktop\lee\game` (이연호 PC)이고, 같은 구조 그대로 저장소에 올림.
+- 줄바꿈: 파일은 LF로 작성됨. Windows에서 받으면 git이 CRLF로 바꿀 수 있는데 동작에는 영향 없음.
+- ⚠️ `site/index.html`은 아티팩트용이라 `<!doctype html>`·`<head>`가 없음(아티팩트가 게시할 때 자동으로 감쌈). GitHub Pages·Vercel 등에 그대로 올릴 거면 build.js처럼 문서로 감싸고 `<meta charset>`, viewport, `body{margin:0}`, `[hidden]{display:none!important}`를 넣어야 함. 게임 페이지 6개는 build.js가 이미 감싸 둠.
 
 ### 2-2. 게시된 아티팩트 (claude.ai, 소유자 계정에서만 열림 — 다른 사람은 공유 필요)
 | 이름 | URL |
@@ -43,7 +49,7 @@
 | HiLo | https://claude.ai/artifact/NJLLd82Xiyr4UsVUFRr9bd |
 | Dice·Limbo·Wheel | https://claude.ai/artifact/MUGahgEBru7mRYHSMDsrh7 |
 
-**다른 컴퓨터에서 소스 받기 (같은 claude.ai 계정일 때):** Claude Code에서 Artifact 도구 `action: "read"`, `url`: 사이트 URL, `paths`: `["index.html","theme.css","crash.html","mines.html","plinko.html","chicken.html","hilo.html","quick.html"]` → 전체 소스가 로컬에 저장됨. 각 게임 페이지 안에 게임 코드 전체가 들어 있음. 다른 계정이면 소유자가 공유 메뉴에서 먼저 공유해야 함.
+소스는 저장소(2-1)에 모두 있으므로 아티팩트는 화면 확인용. 아티팩트를 고쳐 다시 게시하려면 소유자 계정에서 Artifact 도구에 `url`을 넘겨 게시(다른 대화에서 `url` 없이 게시하면 새 아티팩트가 생김).
 
 ### 2-3. 관련 문서 (kasangyong 님 PC에만 있음, 방에 공유 안 됨)
 - `docs/design/betting-site-arch.md` — 실제 서비스 설계 (Next.js + Vercel + Supabase, 평가 3회 통과)
@@ -238,7 +244,7 @@
 4. 기존 8개 게임을 서버 판정으로 옮기기
 
 ## 8. 다른 컴퓨터에서 이어받는 법
-1. 이 방(ccx 「게임만들사람」)에서 `peer_recent` → 이 문서가 올라간 턴을 `peer_turn_detail`로 읽기
-2. 같은 claude.ai 계정이면 2-2의 방법으로 사이트 아티팩트 소스를 통째로 받기
-3. 다른 계정이면 소유자에게 사이트 아티팩트 공유 요청 → 같은 방법으로 받기
+1. `git clone https://github.com/kasangyong/totoro` → 이 문서(`HANDOFF.md`)부터 읽기
+2. 데모는 브라우저로 `*-demo.html`을 바로 열면 동작함. 사이트는 `site/` 폴더를 로컬 서버로 띄워서 확인 (`npx serve site` 등. `file://`로 열면 페이지 간 localStorage가 공유되지 않을 수 있음)
+3. 작업 대화 기록은 ccx 방 「게임만들사람」에서 `peer_recent` → `peer_turn_detail`로 볼 수 있음
 4. 7-3 플랫폼과 7-1의 "세븐 포커" 해석을 사용자에게 확인하고 시작
