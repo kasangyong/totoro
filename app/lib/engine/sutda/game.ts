@@ -19,7 +19,7 @@ import { DECK_SIZE, evaluate, resolve, type SutdaCard, type SutdaHand } from "./
 
 export const MAX_REMATCHES = 3;
 
-export type SutdaPhase = "bet1" | "bet2" | "done";
+export type SutdaPhase = "bet1" | "bet2" | "rejoin" | "done";
 
 export type SutdaResult = {
   payouts: Record<string, number>;
@@ -49,8 +49,15 @@ export type SutdaState = {
   mainWinnerId: string | null;
   /** 재경기로 이어진 쇼다운 기록 (공개된 패만) */
   history: SutdaShowdown[];
+  /** 구사 재경기 참여 결정 대기 중일 때만 */
+  rejoin: SutdaRejoin | null;
   result: SutdaResult | null;
-  secrets: { decks: SutdaCard[][]; deckPos: number };
+  secrets: {
+    decks: SutdaCard[][];
+    deckPos: number;
+    /** 구사 재경기 참여 결정 (전원이 정할 때까지 비공개) */
+    rejoinChoices?: Record<string, boolean>;
+  };
 };
 
 export type SutdaShowdown = {
@@ -62,7 +69,20 @@ export type SutdaShowdown = {
 
 export type SutdaAction =
   | { type: "bet"; seatId: string; action: BetActionType }
-  | { type: "timeout"; seatId: string };
+  | { type: "timeout"; seatId: string }
+  | { type: "rejoin"; seatId: string; join: boolean }
+  /** 참여 결정 기한이 지나면 아직 안 정한 사람은 모두 불참 */
+  | { type: "rejoin_timeout" };
+
+export type SutdaRejoin = {
+  /** 참여금 = 구사 팟 합계의 절반 (내림) */
+  fee: number;
+  candidates: string[];
+  /** 이미 정한 사람 (참여/불참 여부는 비공개) */
+  decided: string[];
+  /** carried 중 구사 재경기 팟의 위치 */
+  gusaPots: number[];
+};
 
 export type CreateSutdaHand = {
   handId: string;
@@ -109,12 +129,13 @@ export function createSutdaHand(p: CreateSutdaHand, decks: SutdaCard[][] = sutda
     rematchNo: 0,
     seats,
     participants: seats.map((s) => s.id),
-    round: { high: 0, raises: 0, bossId: p.bossId, toActId: null },
+    round: { high: 0, raises: {}, bossId: p.bossId, toActId: null },
     cards: [],
     carried: [],
     paid: {},
     mainWinnerId: null,
     history: [],
+    rejoin: null,
     result: null,
     secrets: { decks, deckPos: 0 },
   };
@@ -181,6 +202,8 @@ function showdown(state: SutdaState): SutdaState {
   const reasons = new Set<"구사" | "동점">();
   let mainWinnerId = state.mainWinnerId;
   let splitByLimit = false;
+  /** pending 중 구사 재경기로 넘어가는 팟의 위치 */
+  const gusaPots: number[] = [];
 
   // 아직 메인 팟이 정산되지 않았다면 pots[0]이 메인 팟이다 (재경기로 넘길 때도 맨 앞에 둔다).
   const settle = (index: number, pot: Pot, winners: string[]) => {
@@ -202,6 +225,7 @@ function showdown(state: SutdaState): SutdaState {
       settle(i, pot, r.participants);
       splitByLimit = true;
     } else {
+      if (r.reason === "구사") gusaPots.push(pending.length);
       pending.push({ amount: pot.amount, eligible: r.participants });
       r.participants.forEach((id) => rematchIds.add(id));
       reasons.add(r.reason);
@@ -214,42 +238,103 @@ function showdown(state: SutdaState): SutdaState {
 
   // 재경기가 필요 없는 팟은 먼저 지급하고, 나머지는 새 패로 다시 겨룬다.
   const early = settledTotals(state.seats, settled);
-  const participants = [...rematchIds];
-  const seats = state.seats.map((s) => {
-    const stack = s.stack + (early.get(s.id) ?? 0);
-    const inRematch = participants.includes(s.id);
-    return {
-      ...s,
-      stack,
-      handContrib: 0,
-      roundContrib: 0,
-      folded: !inRematch,
-      // 규칙: 올인했던 사람은 재경기에 참가하되 추가 베팅 없음 (먼저 받은 팟이 있어도 동일).
-      allIn: s.allIn || stack === 0,
-      acted: false,
-    };
-  });
   const record: SutdaShowdown = {
     rematchNo: state.rematchNo,
     cards: cards.filter((c) => c.faceUp),
     hands,
     reasons: [...reasons],
   };
+  const pendingState: SutdaState = {
+    ...state,
+    // 건 돈은 모두 pending 팟으로 옮겨졌으므로 기여는 0. folded는 참여 후보 판단에 쓰려고 그대로 둔다.
+    seats: state.seats.map((s) => ({ ...s, stack: s.stack + (early.get(s.id) ?? 0), handContrib: 0, roundContrib: 0 })),
+    participants: [...rematchIds],
+    cards: [],
+    carried: pending,
+    paid: mergeTotals(state.paid, early),
+    mainWinnerId,
+    history: [...state.history, record],
+    round: { ...state.round, toActId: null },
+  };
+
+  // 구사 재경기: 이번 경기에서 다이한 사람도 구사 팟 판돈의 절반을 내면 들어올 수 있다 (동점 팟은 해당 없음).
+  if (gusaPots.length > 0) {
+    const fee = Math.floor(gusaPots.reduce((a, i) => a + pending[i].amount, 0) / 2);
+    const candidates = pendingState.seats
+      .filter((s) => state.participants.includes(s.id) && s.folded && !rematchIds.has(s.id) && s.stack >= fee)
+      .map((s) => s.id);
+    if (fee > 0 && candidates.length > 0) {
+      return {
+        ...pendingState,
+        phase: "rejoin",
+        rejoin: { fee, candidates, decided: [], gusaPots },
+        secrets: { ...pendingState.secrets, rejoinChoices: {} },
+      };
+    }
+  }
+  return startRematch(pendingState);
+}
+
+function startRematch(state: SutdaState): SutdaState {
+  const seats = state.seats.map((s) => {
+    const inRematch = state.participants.includes(s.id);
+    return {
+      ...s,
+      handContrib: 0,
+      roundContrib: 0,
+      folded: !inRematch,
+      // 규칙: 올인했던 사람은 재경기에 참가하되 추가 베팅 없음 (먼저 받은 팟이 있어도 동일).
+      allIn: s.allIn || s.stack === 0,
+      acted: false,
+    };
+  });
   return beginRound(
     dealOne({
       ...state,
       phase: "bet1",
       rematchNo: state.rematchNo + 1,
       seats,
-      participants,
-      cards: [],
-      carried: pending,
-      paid: mergeTotals(state.paid, early),
-      mainWinnerId,
-      history: [...state.history, record],
+      rejoin: null,
       secrets: { ...state.secrets, deckPos: 0 },
     }),
   );
+}
+
+/** 결정 내용은 전원이 정할 때까지 secrets에만 두고, 공개 상태에는 "누가 정했는지"만 남긴다. */
+function decideRejoin(state: SutdaState, seatId: string, join: boolean): SutdaState {
+  const rejoin = state.rejoin!;
+  if (!rejoin.candidates.includes(seatId) || rejoin.decided.includes(seatId)) throw new SutdaError("cannot decide rejoin");
+  const choices = { ...state.secrets.rejoinChoices, [seatId]: join };
+  const next: SutdaState = {
+    ...state,
+    rejoin: { ...rejoin, decided: [...rejoin.decided, seatId] },
+    secrets: { ...state.secrets, rejoinChoices: choices },
+  };
+  return next.rejoin!.decided.length === rejoin.candidates.length ? applyRejoins(next) : next;
+}
+
+function applyRejoins(state: SutdaState): SutdaState {
+  const { fee, gusaPots } = state.rejoin!;
+  const choices = state.secrets.rejoinChoices ?? {};
+  const joiners = orderBySeat(state.seats, state.rejoin!.candidates.filter((id) => choices[id]));
+  const firstGusa = gusaPots[0];
+  const next: SutdaState = {
+    ...state,
+    seats: state.seats.map((s) => (joiners.includes(s.id) ? { ...s, stack: s.stack - fee } : s)),
+    // [우리 규칙] 참여금은 첫 구사 팟에 더하고, 들어온 사람은 구사 팟에만 자격을 얻는다.
+    carried: state.carried.map((p, i) =>
+      gusaPots.includes(i)
+        ? { amount: p.amount + (i === firstGusa ? fee * joiners.length : 0), eligible: [...p.eligible, ...joiners] }
+        : p,
+    ),
+    participants: [...state.participants, ...joiners],
+    secrets: { ...state.secrets, rejoinChoices: undefined },
+  };
+  return startRematch(next);
+}
+
+function orderBySeat(seats: readonly Seat[], ids: readonly string[]): string[] {
+  return seats.filter((s) => ids.includes(s.id)).sort((a, b) => a.seatNo - b.seatNo).map((s) => s.id);
 }
 
 type Settled = { pot: Pot; winners: string[] };
@@ -296,6 +381,15 @@ function finish(
 
 export function reduceSutda(state: SutdaState, action: SutdaAction): SutdaState {
   if (state.phase === "done") throw new SutdaError("hand is over");
+  if (state.phase === "rejoin") {
+    if (action.type === "rejoin") return decideRejoin(state, action.seatId, action.join);
+    if (action.type === "rejoin_timeout") {
+      const undecided = state.rejoin!.candidates.filter((id) => !state.rejoin!.decided.includes(id));
+      return undecided.reduce((s, id) => decideRejoin(s, id, false), state);
+    }
+    throw new SutdaError("waiting for rejoin decisions");
+  }
+  if (action.type === "rejoin" || action.type === "rejoin_timeout") throw new SutdaError("no rejoin in progress");
   if (state.round.toActId !== action.seatId) throw new SutdaError("not your turn");
   const bet: BetActionType =
     action.type === "bet"

@@ -69,10 +69,15 @@ describe("sutda hand evaluation", () => {
 
 describe("sutda resolution", () => {
   it("follows the documented examples", () => {
-    // [일팔광땡, 9땡, 암행어사] → 9땡
+    // [일팔광땡, 9땡, 암행어사] → 암행어사가 광땡을 잡고 이김
     expect(resolve([hand("a", S(1), S(8)), hand("b", S(9), N(9)), hand("c", S(4), S(7))])).toEqual({
       type: "win",
-      winners: ["b"],
+      winners: ["c"],
+    });
+    // [9땡, 알리, 땡잡이] → 땡잡이가 9땡을 잡고 이김
+    expect(resolve([hand("a", S(9), N(9)), hand("b", N(1), N(2)), hand("c", S(3), S(7))])).toEqual({
+      type: "win",
+      winners: ["c"],
     });
     // [장땡, 5땡, 땡잡이] → 장땡
     expect(resolve([hand("a", S(10), N(10)), hand("b", S(5), N(5)), hand("c", S(3), S(7))])).toEqual({
@@ -83,6 +88,19 @@ describe("sutda resolution", () => {
     expect(resolve([hand("a", S(9), N(9)), hand("b", S(5), N(5)), hand("c", S(3), S(7))])).toEqual({
       type: "win",
       winners: ["c"],
+    });
+  });
+
+  it("only catches when the caught hand is the top hand", () => {
+    // 38광땡이 1위면 암행어사는 18광땡이 있어도 못 잡음
+    expect(resolve([hand("a", S(3), S(8)), hand("b", N(1), N(2)), hand("c", S(4), S(7))])).toEqual({
+      type: "win",
+      winners: ["a"],
+    });
+    // 장땡이 1위면 5땡이 있어도 땡잡이는 망통
+    expect(resolve([hand("a", S(10), N(10)), hand("b", S(5), N(5)), hand("c", S(3), S(7))])).toEqual({
+      type: "win",
+      winners: ["a"],
     });
   });
 

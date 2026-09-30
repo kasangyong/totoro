@@ -49,7 +49,17 @@ function checkThrough(state: SutdaState): SutdaState {
   return s;
 }
 
-const totalChips = (s: SutdaState) => s.seats.reduce((a, x) => a + x.stack + x.handContrib, 0) +
+/** 무작위 진행용: 베팅 차례면 가능한 액션 중 하나, 재경기 참여 대기면 후보 한 명의 참여/불참 */
+function pickAction(s: SutdaState, pick: (n: number) => number): SutdaAction {
+  if (s.phase === "rejoin") {
+    const undecided = s.rejoin!.candidates.filter((id) => !s.rejoin!.decided.includes(id));
+    return { type: "rejoin", seatId: undecided[pick(undecided.length)], join: pick(2) === 0 };
+  }
+  const legal = legalActions(s.seats, s.round, s.round.toActId!);
+  return { type: "bet", seatId: s.round.toActId!, action: legal[pick(legal.length)] };
+}
+
+const totalChips =(s: SutdaState) => s.seats.reduce((a, x) => a + x.stack + x.handContrib, 0) +
   s.carried.reduce((a, p) => a + p.amount, 0);
 
 describe("sutda hand flow", () => {
@@ -152,6 +162,99 @@ describe("sutda hand flow", () => {
     expect(s.result!.payouts.p2).toBeUndefined();
   });
 
+  it("lets players who died rejoin a 구사 rematch for half the pot", () => {
+    // 1장째 [p0,p1,p2], 2장째 [p0,p1,p2] → p0 구사(4·9), p1 5끗, p2는 1차에서 다이
+    const first = deck([N(4), N(2), S(5), N(9), N(3), N(6)]);
+    const rematch = deck([S(10), N(1), N(2), N(10), N(3), N(5)]); // p0 장땡, p1 1·3=4끗, p2 2·5=7끗
+    let s = createSutdaHand(params(3), [first, rematch, deck([]), deck([])]);
+    s = act(s, "ping"); // p0 (팟 40)
+    s = act(s, "call"); // p1 (팟 50)
+    s = act(s, "die"); // p2
+    s = checkThrough(s);
+    expect(s.phase).toBe("rejoin");
+    expect(s.history[0].reasons).toEqual(["구사"]);
+    expect(s.rejoin).toEqual({ fee: 25, candidates: ["p2"], decided: [], gusaPots: [0] });
+    expect(totalChips(s)).toBe(3000);
+    expect(() => reduceSutda(s, { type: "bet", seatId: "p0", action: "check" })).toThrow();
+
+    s = reduceSutda(s, { type: "rejoin", seatId: "p2", join: true });
+    expect(s.phase).toBe("bet1");
+    expect(s.rematchNo).toBe(1);
+    expect(s.participants.sort()).toEqual(["p0", "p1", "p2"]);
+    expect(s.carried).toEqual([{ amount: 75, eligible: ["p0", "p1", "p2"] }]);
+    expect(s.cards).toHaveLength(3);
+    expect(totalChips(s)).toBe(3000);
+    s = checkThrough(s);
+    expect(s.phase).toBe("done");
+    expect(s.result!.payouts).toEqual({ p0: 75 });
+  });
+
+  it("keeps rejoin choices secret until everyone has decided", () => {
+    // 4인: p0 구사, p1 5끗, p2·p3 다이
+    const first = deck([N(4), N(2), S(5), S(7), N(9), N(3), N(6), N(7)]);
+    let s = createSutdaHand(params(4), [first, deck([]), deck([]), deck([])]);
+    s = act(act(act(act(s, "ping"), "call"), "die"), "die");
+    s = checkThrough(s);
+    expect(s.phase).toBe("rejoin");
+    expect(s.rejoin!.candidates).toEqual(["p2", "p3"]);
+    const before = JSON.stringify(viewSutda(s, "p3"));
+    s = reduceSutda(s, { type: "rejoin", seatId: "p2", join: true });
+    const v = viewSutda(s, "p3");
+    expect(v.rejoin!.decided).toEqual(["p2"]);
+    expect(JSON.stringify(v)).not.toContain("rejoinChoices");
+    // 스택·팟은 전원이 정하기 전엔 그대로
+    expect(v.seats.find((x) => x.id === "p2")!.stack).toBe(JSON.parse(before).seats.find((x: { id: string }) => x.id === "p2").stack);
+    expect(v.carried).toEqual(JSON.parse(before).carried);
+    s = reduceSutda(s, { type: "rejoin", seatId: "p3", join: false });
+    expect(s.phase).toBe("bet1");
+    expect(s.participants.sort()).toEqual(["p0", "p1", "p2"]);
+    expect(s.secrets.rejoinChoices).toBeUndefined();
+  });
+
+  it("charges and grants eligibility only for 구사 pots when a tie pot is also rematched", () => {
+    const p = params(4);
+    p.seats[0].stack = 20;
+    // p0 구사(올인), p1 5끗, p2 5끗, p3 다이 → 메인 팟 구사 재경기, 사이드 팟 p1·p2 동점 재경기
+    const first = deck([N(4), S(2), S(6), N(5), S(9), N(3), N(9), N(6)]);
+    let s = createSutdaHand(p, [first, deck([]), deck([]), deck([])]);
+    s = act(s, "ping");
+    s = act(s, "half");
+    s = act(s, "call");
+    s = act(s, "die");
+    s = checkThrough(s);
+    expect(s.phase).toBe("rejoin");
+    expect(s.history[0].reasons.sort()).toEqual(["구사", "동점"]);
+    const [main, side] = s.carried;
+    expect(s.rejoin!.gusaPots).toEqual([0]);
+    expect(s.rejoin!.fee).toBe(Math.floor(main.amount / 2));
+    s = reduceSutda(s, { type: "rejoin", seatId: "p3", join: true });
+    expect(s.carried[0]).toEqual({ amount: main.amount + Math.floor(main.amount / 2), eligible: [...main.eligible, "p3"] });
+    expect(s.carried[1]).toEqual(side);
+    expect(s.carried[1].eligible).not.toContain("p3");
+  });
+
+  it("treats undecided rejoin candidates as passing on timeout", () => {
+    const first = deck([N(4), N(2), S(5), N(9), N(3), N(6)]);
+    let s = createSutdaHand(params(3), [first, deck([S(10), N(1), N(10), N(2)]), deck([]), deck([])]);
+    s = act(act(act(s, "ping"), "call"), "die");
+    s = checkThrough(s);
+    expect(s.phase).toBe("rejoin");
+    s = reduceSutda(s, { type: "rejoin_timeout" });
+    expect(s.phase).toBe("bet1");
+    expect(s.participants.sort()).toEqual(["p0", "p1"]);
+  });
+
+  it("does not offer rejoining for a tie rematch", () => {
+    // p0 5끗, p1 5끗, p2 다이 → 동점 재경기, 참여 대기 없음
+    const first = deck([S(2), S(6), N(5), N(3), N(9), N(6)]);
+    let s = createSutdaHand(params(3), [first, deck([S(10), N(1), N(10), N(2)]), deck([]), deck([])]);
+    s = act(act(act(s, "ping"), "call"), "die");
+    s = checkThrough(s);
+    expect(s.phase).toBe("bet1");
+    expect(s.rematchNo).toBe(1);
+    expect(s.rejoin).toBeNull();
+  });
+
   it("does not flag a split when the last allowed rematch has a winner", () => {
     const tie = deck([S(2), S(6), N(3), N(9)]);
     const p0wins = deck([S(10), N(1), N(10), N(2)]);
@@ -195,8 +298,7 @@ describe("sutda hand flow", () => {
     const log: SutdaAction[] = [];
     let s = createSutdaHand(p);
     while (s.phase !== "done") {
-      const legal = legalActions(s.seats, s.round, s.round.toActId!);
-      const a: SutdaAction = { type: "bet", seatId: s.round.toActId!, action: legal[log.length % legal.length] };
+      const a = pickAction(s, (n) => log.length % n);
       log.push(a);
       s = reduceSutda(s, a);
     }
@@ -222,8 +324,7 @@ describe("sutda conservation (fuzz)", () => {
       let steps = 0;
       while (s.phase !== "done") {
         expect(totalChips(s)).toBe(start);
-        const legal = legalActions(s.seats, s.round, s.round.toActId!);
-        s = reduceSutda(s, { type: "bet", seatId: s.round.toActId!, action: legal[rand(legal.length)] });
+        s = reduceSutda(s, pickAction(s, rand));
         expect(++steps).toBeLessThan(500);
       }
       expect(s.seats.reduce((a, x) => a + x.stack, 0)).toBe(start);

@@ -1,6 +1,7 @@
 // 한국식 팟 베팅 — docs/design/card-games-rules.md "공통 베팅". 모든 함수는 입력을 바꾸지 않고 새 값을 돌려준다.
 
-export const MAX_RAISES_PER_ROUND = 3;
+/** [우리 규칙] 한 라운드에 한 사람이 할 수 있는 레이즈(따당·쿼터·하프) 횟수 */
+export const MAX_RAISES_PER_SEAT = 2;
 
 export type Seat = {
   id: string;
@@ -15,7 +16,8 @@ export type Seat = {
 
 export type Round = {
   high: number;
-  raises: number;
+  /** 이번 라운드에 좌석별로 한 레이즈 횟수 */
+  raises: Record<string, number>;
   bossId: string;
   toActId: string | null;
 };
@@ -84,7 +86,7 @@ export function startRound(seats: readonly Seat[], bossId: string): { seats: Sea
   const boss = seats.find((s) => s.id === bossId);
   if (!boss) throw new BettingError("boss not seated");
   const reset = seats.map((s) => ({ ...s, roundContrib: 0, acted: false }));
-  const round: Round = { high: 0, raises: 0, bossId, toActId: null };
+  const round: Round = { high: 0, raises: {}, bossId, toActId: null };
   round.toActId = nextActor(reset, round, boss.seatNo, true);
   // 지정된 보스가 다이·올인이면 그 라운드에 처음 액션하는 사람이 보스(삥 권한)를 넘겨받는다.
   if (round.toActId !== null) round.bossId = round.toActId;
@@ -113,7 +115,7 @@ export function legalActions(seats: readonly Seat[], round: Round, seatId: strin
     actions.push("call");
   }
   const someoneCanRespond = seats.some((s) => s.id !== seatId && canAct(s));
-  if (round.raises < MAX_RAISES_PER_ROUND && seat.stack > owed && someoneCanRespond) {
+  if ((round.raises[seatId] ?? 0) < MAX_RAISES_PER_SEAT && seat.stack > owed && someoneCanRespond) {
     if (round.high > 0) actions.push("ddadang");
     actions.push("quarter", "half");
   }
@@ -167,7 +169,7 @@ export function applyAction(
   const nextRound: Round = {
     ...round,
     high,
-    raises: round.raises + (RAISES.has(action) ? 1 : 0),
+    raises: RAISES.has(action) ? { ...round.raises, [seatId]: (round.raises[seatId] ?? 0) + 1 } : round.raises,
     toActId: null,
   };
   nextRound.toActId = nextActor(nextSeats, nextRound, seat.seatNo, false);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_RAISES_PER_ROUND,
+  MAX_RAISES_PER_SEAT,
   applyAction,
   awardPots,
   computePots,
@@ -37,7 +37,7 @@ describe("betting round", () => {
     let { seats, round } = startRound(table([100, 100]), "p0");
     expect(legalActions(seats, round, "p0")).toContain("ping");
     ({ seats, round } = applyAction(seats, round, "p0", "ping", BASE));
-    expect(round.raises).toBe(0);
+    expect(round.raises).toEqual({});
     expect(legalActions(seats, round, "p1")).not.toContain("ping");
     ({ seats, round } = applyAction(seats, round, "p1", "call", BASE));
     expect(isRoundOver(round)).toBe(true);
@@ -61,15 +61,36 @@ describe("betting round", () => {
     ({ seats, round } = applyAction(seats, round, "p0", "half", BASE));
     // pot 50, owed 10 → pot after call 60 → 20 + 30
     expect(round.high).toBe(50);
-    expect(round.raises).toBe(3);
+    expect(round.raises).toEqual({ p0: 2, p1: 1 });
   });
 
-  it(`caps raises at ${MAX_RAISES_PER_ROUND} per round`, () => {
+  it(`caps raises at ${MAX_RAISES_PER_SEAT} per seat per round`, () => {
     let { seats, round } = startRound(table([100000, 100000]), "p0");
     ({ seats, round } = applyAction(seats, round, "p0", "half", BASE));
     ({ seats, round } = applyAction(seats, round, "p1", "half", BASE));
     ({ seats, round } = applyAction(seats, round, "p0", "half", BASE));
-    expect(legalActions(seats, round, "p1")).toEqual(["call", "die"]);
+    ({ seats, round } = applyAction(seats, round, "p1", "half", BASE));
+    // 둘 다 2번씩 레이즈 → p0은 콜·다이만
+    expect(legalActions(seats, round, "p0")).toEqual(["call", "die"]);
+    ({ seats, round } = applyAction(seats, round, "p0", "call", BASE));
+    expect(isRoundOver(round)).toBe(true);
+    // 다음 라운드에는 다시 레이즈 가능
+    ({ seats, round } = startRound(seats, "p0"));
+    expect(legalActions(seats, round, "p0")).toContain("half");
+  });
+
+  it("counts raises per seat, so one player's cap does not stop others", () => {
+    let { seats, round } = startRound(table([100000, 100000, 100000]), "p0");
+    ({ seats, round } = applyAction(seats, round, "p0", "half", BASE));
+    ({ seats, round } = applyAction(seats, round, "p1", "half", BASE));
+    ({ seats, round } = applyAction(seats, round, "p2", "call", BASE));
+    ({ seats, round } = applyAction(seats, round, "p0", "half", BASE));
+    ({ seats, round } = applyAction(seats, round, "p1", "call", BASE));
+    expect(round.raises).toEqual({ p0: 2, p1: 1 });
+    expect(round.toActId).toBe("p2");
+    expect(legalActions(seats, round, "p2")).toContain("half");
+    ({ seats, round } = applyAction(seats, round, "p2", "half", BASE));
+    expect(legalActions(seats, round, "p0")).toEqual(["call", "die"]);
   });
 
   it("gives the pot to the last player when others die", () => {

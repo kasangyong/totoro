@@ -93,19 +93,16 @@ export type Resolution =
 const isGwangDdang = (v: number) => v === V_GWANG;
 const isCatchableDdang = (v: number) => v >= V_DDANG + 1 && v <= V_DDANG + 9;
 
-/** 규칙 문서 "판정 알고리즘": 잡기 반복 → 구사 재경기 → 동점 재경기 → 승자. */
+/** 규칙 문서 "판정 알고리즘": 잡기 → 구사 재경기 → 동점 재경기 → 승자. */
 export function resolve(candidates: readonly { id: string; hand: SutdaHand }[]): Resolution {
   if (candidates.length === 0) throw new Error("no candidates");
-  let pool = [...candidates];
+  const pool = [...candidates];
 
-  for (;;) {
-    const top = Math.max(...pool.map((c) => c.hand.value));
-    const catcher = isGwangDdang(top)
-      ? pool.some((c) => c.hand.kind === "암행어사")
-      : isCatchableDdang(top) && pool.some((c) => c.hand.kind === "땡잡이");
-    if (!catcher) break;
-    pool = pool.filter((c) => c.hand.value !== top);
-  }
+  // 1위가 13·18광땡이면 암행어사가, 1~9땡이면 땡잡이가 잡고 그대로 이긴다.
+  const top = Math.max(...pool.map((c) => c.hand.value));
+  const catcherKind = isGwangDdang(top) ? "암행어사" : isCatchableDdang(top) ? "땡잡이" : null;
+  const catcher = catcherKind ? pool.find((c) => c.hand.kind === catcherKind) : undefined;
+  if (catcher) return { type: "win", winners: [catcher.id] };
 
   const gusa = pool.filter((c) => c.hand.kind === "구사" || c.hand.kind === "멍텅구리구사");
   if (gusa.length > 0) {
@@ -117,7 +114,6 @@ export function resolve(candidates: readonly { id: string; hand: SutdaHand }[]):
     if (triggers) return { type: "rematch", participants: candidates.map((c) => c.id), reason: "구사" };
   }
 
-  const top = Math.max(...pool.map((c) => c.hand.value));
   const leaders = pool.filter((c) => c.hand.value === top).map((c) => c.id);
   if (leaders.length > 1) return { type: "rematch", participants: leaders, reason: "동점" };
   return { type: "win", winners: leaders };
