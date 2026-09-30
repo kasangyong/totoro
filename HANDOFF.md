@@ -51,9 +51,9 @@ git clone https://github.com/kasangyong/totoro
 
 소스는 저장소(2-1)에 모두 있으므로 아티팩트는 화면 확인용. 아티팩트를 고쳐 다시 게시하려면 소유자 계정에서 Artifact 도구에 `url`을 넘겨 게시(다른 대화에서 `url` 없이 게시하면 새 아티팩트가 생김).
 
-### 2-3. 관련 문서 (kasangyong 님 PC에만 있음, 방에 공유 안 됨)
-- `docs/design/betting-site-arch.md` — 실제 서비스 설계 (Next.js + Vercel + Supabase, 평가 3회 통과)
-- `docs/product-brief.md` — 요구사항
+### 2-3. 관련 문서 (저장소 `docs/`)
+- [`docs/design/betting-site-arch.md`](docs/design/betting-site-arch.md) — 실제 서비스 설계 (Next.js + Vercel + Supabase, 평가 3회 통과)
+- [`docs/product-brief.md`](docs/product-brief.md) — 요구사항
 - 핵심 결정: 초대코드+아이디/비번 가입, 포인트 원장(모든 변동 기록, DB에서 중복 지급 차단), 서버 시드 커밋→공개로 결과 검증, Crash는 시간 기준 계산 + 0.25초 폴링, 예측 베팅은 패리뮤추얼·관리자 확정·정답자 없으면 전액 환불.
 - 남은 설계 주의: Supabase는 public 함수에 anon EXECUTE를 자동 부여 → `REVOKE … FROM public, anon, authenticated` 명시. 관리자 비번 리셋은 service role 필요(“Vercel은 가입에만” 문구와 충돌).
 
