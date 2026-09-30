@@ -20,7 +20,7 @@
 | C. Supabase Edge Function(Deno) | DB와 가까움 | 런타임 추가, 코드 공유 번거로움 |
 
 **추천: B.**
-- 엔진 = `packages/engine` 순수 함수 `reduce(state, action) → { state, effects }`. 부수효과 없음, 시각은 action에 담겨 들어옴.
+- 엔진 = `app/lib/engine` 순수 함수 (별도 패키지 없이 Next 앱 안에 둠) `reduce(state, action) → { state, effects }`. 부수효과 없음, 시각은 action에 담겨 들어옴.
 - **시드는 private state 안에 보관**(`state.secrets.server_seed`, `client_seeds`)하고 reduce가 딜·재경기 셔플을 직접 수행 → `replay(seeds, action_log)`는 같은 reduce를 처음부터 다시 돌리기만 하면 됨. 공개 응답은 `viewFor`가 `secrets`를 제거.
 - `POST /api/rooms/[id]/action`:
   1. `auth.getUser()`로 사용자 확인 (body의 user id 무시). 행동 주체 = 그 사용자의 좌석.
@@ -174,7 +174,7 @@
 ## 엔진 모듈 구조
 
 ```
-packages/engine/
+app/lib/engine/
   rng.ts          RNG 규격 v1 (테스트 벡터 포함)
   betting.ts      한국식 베팅, 라운드 종료, 올인·사이드팟, 나머지 배분
   sutda/          덱, 족보, 잡기 반복 판정, 재경기, reduce
