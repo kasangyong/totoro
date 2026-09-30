@@ -117,8 +117,8 @@
 **추천: B.**
 - 원장 kind: `table_buyin`(−), `table_cashout`(+), `ref_id = 'seat:{seat_session_id}'` (착석마다 새 uuid → 착석 1회당 바이인·반환 각 1번).
 - 바이인: 기본금 × 10 이상 ~ 보유 전부.
-- **스택의 단일 원천 = `room_seats.stack`과 `room_seats.hand_contrib`(이번 판 누적 기여).** `room_state.state`에는 카드·턴·팟 구조만 두고, 엔진은 트랜잭션 안에서 좌석 행을 읽어 상태에 합친 뒤 결과를 좌석 행에 다시 씀.
-- 보존 불변식: `Σ원장 = Σ지갑 + Σ스택 + Σhand_contrib` → 테스트와 관리자 점검 쿼리로 확인.
+- **스택 원천 (구현 반영):** 판 밖에서는 `room_seats.stack`이 원천. 판이 시작되면 `hand_start_stack = stack`을 기록하고, 판 도중 실시간 스택은 `room_state.state.game`에만 있다 (`room_seats.stack`은 판 시작 값 그대로). 판이 끝나면 최종 스택을 `room_seats.stack`에 쓰고 `hand_start_stack = null`. `hand_contrib` 컬럼은 쓰지 않음.
+- 보존 불변식: 언제나 `Σ원장 = Σ지갑 + Σroom_seats.stack` (판 도중에는 판 시작 스택 기준이라 성립). 판 무효 처리 = 판 시작 스택으로 반환.
 - 나머지 처리: 균등 분배·사이드팟의 나머지 포인트는 **좌석 번호가 가장 낮은 수령자에게** (소멸 없음). 규칙 문서도 동일하게 수정.
 
 ---

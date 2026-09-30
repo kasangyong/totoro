@@ -1,26 +1,123 @@
 @import "tailwindcss";
 
+/* 배팅 할래 말래 · 공통 테마 (site/theme.css와 같은 토큰) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #08221b;
+  --felt: #0e3a2e;
+  --felt-hi: #15523f;
+  --panel: #0d3027;
+  --raise: #164035;
+  --line: #2a5747;
+  --fg: #f4eddc;
+  --muted: #a3b8aa;
+  --accent: #e4b650;
+  --accent-ink: #2b1d04;
+  --gold-dim: #8a6f33;
+  --win: #74eab0;
+  --win-ink: #05281a;
+  --bust: #ff6b5b;
+  --card: #fbf7ec;
+  --card-ink: #1c2030;
+  --card-red: #c9242f;
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-felt: var(--felt);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-gold-dim: var(--gold-dim);
+  --color-win: var(--win);
+  --color-bust: var(--bust);
+  --font-display: var(--font-oswald), var(--font-plex), system-ui, sans-serif;
+  --font-logo: var(--font-bhs), var(--font-plex), system-ui, sans-serif;
+  --font-sans: var(--font-plex), system-ui, -apple-system, "Malgun Gothic", sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  margin: 0;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background:
+    radial-gradient(120% 80% at 50% 0%, var(--felt-hi) 0%, var(--felt) 40%, var(--bg) 100%) fixed;
+  background-color: var(--bg);
+  min-height: 100vh;
+  color: var(--fg);
+  font-family: var(--font-sans);
+}
+
+.panel {
+  border: 1px solid var(--gold-dim);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--panel), color-mix(in srgb, var(--panel) 82%, #000));
+  box-shadow: 0 0 0 4px rgba(228, 182, 80, 0.06), 0 14px 30px rgba(0, 0, 0, 0.35);
+}
+
+.stage {
+  border: 2px solid var(--gold-dim);
+  border-radius: 18px;
+  background: radial-gradient(90% 80% at 50% 38%, var(--felt-hi) 0%, var(--felt) 55%, var(--bg) 100%);
+  box-shadow: inset 0 0 70px rgba(0, 0, 0, 0.5), 0 0 0 4px rgba(0, 0, 0, 0.22), 0 14px 34px rgba(0, 0, 0, 0.4);
+}
+
+.btn-main {
+  background: linear-gradient(180deg, #f3cd6c 0%, var(--accent) 55%, #b8892b 100%);
+  color: var(--accent-ink);
+  box-shadow: 0 4px 0 #6f5217, 0 10px 20px rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.btn-main:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #6f5217, 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+.btn-main:disabled {
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--muted);
+  box-shadow: none;
+  text-shadow: none;
+  border: 1px solid var(--line);
+}
+
+.btn-ghost {
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 12px;
+  color: var(--fg);
+}
+.btn-ghost:hover:not(:disabled) {
+  border-color: var(--gold-dim);
+}
+.btn-ghost:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.field {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--fg);
+  padding: 10px 12px;
+}
+.field:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.chip-coin {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex: none;
+  background: radial-gradient(circle, var(--accent) 0 45%, transparent 46%),
+    repeating-conic-gradient(var(--accent) 0 30deg, var(--fg) 30deg 60deg);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }

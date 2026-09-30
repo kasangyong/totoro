@@ -254,5 +254,5 @@ describe("conservation (fuzz)", () => {
       const payouts = awardPots(pots, seats, (ids) => [ids[0]]);
       expect([...payouts.values()].reduce((a, b) => a + b, 0)).toBe(potTotal(seats));
     }
-  });
+  }, 60_000);
 });

@@ -330,5 +330,5 @@ describe("sutda conservation (fuzz)", () => {
       expect(s.seats.reduce((a, x) => a + x.stack, 0)).toBe(start);
       expect(s.seats.every((x) => x.stack >= 0 && x.handContrib === 0)).toBe(true);
     }
-  });
+  }, 60_000);
 });

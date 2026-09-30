@@ -1,0 +1,326 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { BetActionType } from "@/lib/engine/betting";
+import type { RoomView } from "@/lib/rooms/service";
+import { supabaseBrowser } from "@/lib/supabase/browser";
+import { HwatuCard } from "./hwatu-card";
+
+const ACTION_LABEL: Record<BetActionType, string> = {
+  check: "체크",
+  ping: "삥",
+  call: "콜",
+  ddadang: "따당",
+  quarter: "쿼터",
+  half: "하프",
+  die: "다이",
+};
+
+const PHASE_LABEL: Record<string, string> = {
+  idle: "시작 대기",
+  seeding: "카드 섞는 중",
+  playing: "진행 중",
+  between: "다음 판 준비",
+  closed: "닫힌 방",
+};
+
+type ApiResult<T> = { data?: T; error?: string };
+
+async function post<T>(url: string, body: unknown = {}): Promise<ApiResult<T> & { status: number }> {
+  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const json: ApiResult<T> = await res.json().catch(() => ({}));
+  return { ...json, status: res.status };
+}
+
+function randomSeedHex(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export function RoomTable({ roomId }: { roomId: string }) {
+  const [view, setView] = useState<RoomView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [buyIn, setBuyIn] = useState<number | null>(null);
+  /** 서버 시각 기준 현재 시간 (250ms마다 갱신) */
+  const [now, setNow] = useState(() => Date.now());
+  const offset = useRef(0);
+  const seedSent = useRef<string | null>(null);
+  const deadlineRef = useRef<number | null>(null);
+  const lastTickAt = useRef(0);
+
+  const refresh = useCallback(async () => {
+    const res = await fetch(`/api/rooms/${roomId}`, { cache: "no-store" }).catch(() => null);
+    if (!res) return;
+    const body: ApiResult<RoomView> = await res.json().catch(() => ({}));
+    if (!res.ok || !body.data) {
+      setError(body.error ?? "방을 불러오지 못했어요.");
+      return;
+    }
+    offset.current = new Date(body.data.serverNow).getTime() - Date.now();
+    deadlineRef.current = body.data.deadline ? new Date(body.data.deadline).getTime() : null;
+    setView(body.data);
+  }, [roomId]);
+
+  // 첫 조회 + 실시간 이벤트 구독 + 보조 폴링
+  useEffect(() => {
+    const first = setTimeout(() => void refresh(), 0);
+    const supabase = supabaseBrowser();
+    const channel = supabase
+      .channel(`room:${roomId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "room_events", filter: `room_id=eq.${roomId}` }, () => {
+        void refresh();
+      })
+      .subscribe();
+    const poll = setInterval(() => void refresh(), 4000);
+    // 250ms 시계: 화면 시간 갱신 + 기한이 지났으면 tick (서버가 한 번만 적용). 실패하거나 그대로면 2초마다 다시.
+    const clock = setInterval(() => {
+      const serverNow = Date.now() + offset.current;
+      setNow(serverNow);
+      const deadline = deadlineRef.current;
+      if (deadline !== null && serverNow > deadline + 300 && Date.now() - lastTickAt.current > 2000) {
+        lastTickAt.current = Date.now();
+        void post(`/api/rooms/${roomId}/tick`)
+          .catch(() => null)
+          .then(() => refresh());
+      }
+    }, 250);
+    return () => {
+      clearTimeout(first);
+      clearInterval(poll);
+      clearInterval(clock);
+      void supabase.removeChannel(channel);
+    };
+  }, [roomId, refresh]);
+
+  // 섞기 전에 내 시드를 만들어 보관하고 제출 (검증 페이지에서 대조)
+  useEffect(() => {
+    if (!view?.needSeed || !view.handId || seedSent.current === view.handId) return;
+    seedSent.current = view.handId;
+    const handId = view.handId;
+    const seed = randomSeedHex();
+    void post(`/api/rooms/${roomId}/seed`, { clientSeed: seed }).then((r) => {
+      // 서버가 받아들인 시드만 보관 (기한을 넘겨 거절되면 자동 시드가 쓰이므로 대조 대상이 아니다)
+      if (!r.error) {
+        try {
+          localStorage.setItem(`bhmh.seed.${handId}`, seed);
+        } catch {
+          // 저장이 안 되면 검증 페이지의 "내 시드 대조"만 못 할 뿐 게임은 진행된다
+        }
+      }
+      void refresh();
+    });
+  }, [view?.needSeed, view?.handId, roomId, refresh]);
+
+  async function run(op: string, body: unknown = {}) {
+    setBusy(true);
+    setError(null);
+    const r = await post(`/api/rooms/${roomId}/${op}`, body);
+    setBusy(false);
+    if (r.error) setError(r.error);
+    await refresh();
+  }
+
+  if (!view) {
+    return <main className="p-6 text-muted">{error ?? "불러오는 중…"}</main>;
+  }
+
+  const me = view.me;
+  const mySeat = view.seats.find((s) => s.userId === me);
+  const game = view.game;
+  const remaining = view.deadline ? Math.max(0, new Date(view.deadline).getTime() - now) : null;
+  // 단계별 제한 시간 (lib/rooms/service.ts의 SEED_MS·TURN_MS·REJOIN_MS·BETWEEN_MS와 같게)
+  const totalMs =
+    view.phase === "seeding" || view.phase === "between" ? 5000 : view.game?.phase === "rejoin" ? 10000 : 20000;
+  const isHost = view.room.hostId === me;
+  const pot = game ? game.seats.reduce((a, s) => a + s.handContrib, 0) + game.carried.reduce((a, p) => a + p.amount, 0) : 0;
+  const gameSeat = (id: string) => game?.seats.find((s) => s.id === id);
+  const rejoin = game?.phase === "rejoin" ? game.rejoin : null;
+  const minBuyIn = view.room.baseBet * 10;
+  const result = view.phase === "between" && game?.result ? game.result : null;
+
+  return (
+    <main className="mx-auto w-full max-w-5xl px-4 py-5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-accent/30 pb-3">
+        <Link href="/rooms" className="rounded-full border border-gold-dim px-3 py-1 text-sm font-bold text-accent">
+          ‹ 방 목록
+        </Link>
+        <div className="text-center">
+          <h1 className="font-bold">{view.room.name}</h1>
+          <p className="text-xs text-muted">
+            섯다 · 기본금 {view.room.baseBet.toLocaleString("ko-KR")}P · {view.handNo > 0 ? `${view.handNo}번째 판` : "첫 판 전"} ·{" "}
+            {PHASE_LABEL[view.phase]}
+          </p>
+        </div>
+        <span className="w-20 text-right text-xs text-muted">{view.commit ? `커밋 ${view.commit.slice(0, 8)}…` : ""}</span>
+      </header>
+
+      <section className="stage mt-4 grid gap-4 p-4 sm:p-6">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted">
+            {view.phase === "seeding" && `모두의 시드를 모으는 중 (${view.seedsSubmitted.length}/${view.players.length})`}
+            {view.phase === "playing" && game?.phase === "rejoin" && "구사 재경기 · 죽은 사람 참여 결정 중"}
+            {view.phase === "playing" && game && game.phase !== "rejoin" && `${game.rematchNo > 0 ? `재경기 ${game.rematchNo} · ` : ""}${game.phase === "bet1" ? "1차 베팅" : "2차 베팅"}`}
+            {view.phase === "between" && "판이 끝났어요"}
+            {view.phase === "idle" && "2명 이상 앉으면 방장이 시작할 수 있어요"}
+          </p>
+          <div className="text-right">
+            <p className="text-xs text-muted">판돈</p>
+            <p className="font-display text-3xl text-accent">{pot.toLocaleString("ko-KR")}</p>
+          </div>
+        </div>
+        {remaining !== null && (
+          <div
+            className="h-1.5 overflow-hidden rounded bg-black/30"
+            role="progressbar"
+            aria-label="남은 시간"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(totalMs / 1000)}
+            aria-valuenow={Math.ceil(remaining / 1000)}
+          >
+            <div className="h-full bg-accent transition-[width]" style={{ width: `${Math.min(100, (remaining / totalMs) * 100)}%` }} />
+          </div>
+        )}
+
+        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {view.seats.map((s) => {
+            const gs = gameSeat(s.userId);
+            const cards = game?.cards.filter((c) => c.ownerId === s.userId) ?? [];
+            const turn = game?.round.toActId === s.userId && game.phase !== "done" && game.phase !== "rejoin";
+            const handLabel = result?.hands[s.userId]?.label;
+            const won = result && (result.payouts[s.userId] ?? 0) > 0;
+            return (
+              <li
+                key={s.userId}
+                className={`rounded-xl border p-3 ${turn ? "border-accent bg-accent/10" : "border-line bg-black/20"} ${gs?.folded ? "opacity-50" : ""}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate font-bold">
+                    {s.username}
+                    {s.userId === me && <span className="ml-1 text-xs text-accent">(나)</span>}
+                  </p>
+                  <span className="font-display text-lg">{s.stack.toLocaleString("ko-KR")}</span>
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                  {game?.bossId === s.userId && <Badge>보스</Badge>}
+                  {view.room.hostId === s.userId && <Badge>방장</Badge>}
+                  {turn && <Badge tone="accent">차례</Badge>}
+                  {gs?.folded && view.players.includes(s.userId) && <Badge>다이</Badge>}
+                  {gs?.allIn && !gs.folded && <Badge tone="accent">올인</Badge>}
+                  {s.status === "away" && <Badge>자리 비움</Badge>}
+                  {handLabel && <Badge tone={won ? "win" : undefined}>{handLabel}</Badge>}
+                </div>
+                <div className="mt-2 flex min-h-14 gap-1.5">
+                  {cards.map((c, i) => (
+                    <HwatuCard key={i} card={c.card} small />
+                  ))}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        {mySeat && game && view.phase === "playing" && (
+          <div className="flex justify-center gap-2">
+            {game.cards
+              .filter((c) => c.ownerId === me)
+              .map((c, i) => (
+                <HwatuCard key={i} card={c.card} />
+              ))}
+          </div>
+        )}
+      </section>
+
+      {result && (
+        <section className="panel mt-4 p-4">
+          <p className="font-bold text-accent">
+            {view.seats.find((s) => s.userId === result.winnerId)?.username ?? "누군가"} 승리
+            {result.splitAfterMaxRematches && " · 재경기 3번 후 나눠 가짐"}
+          </p>
+          <ul className="mt-2 text-sm text-muted">
+            {Object.entries(result.payouts).map(([id, amt]) => (
+              <li key={id}>
+                {view.seats.find((s) => s.userId === id)?.username ?? id.slice(0, 6)} +{amt.toLocaleString("ko-KR")}P
+              </li>
+            ))}
+          </ul>
+          {view.handId && (
+            <Link href={`/verify/${view.handId}`} className="mt-2 inline-block text-sm text-accent underline">
+              이 판 검증하기
+            </Link>
+          )}
+        </section>
+      )}
+
+      <section className="mt-4 flex flex-wrap items-center gap-2">
+        {rejoin && rejoin.candidates.includes(me) && !rejoin.decided.includes(me) && (
+          <div className="panel flex w-full flex-wrap items-center gap-3 p-4">
+            <p className="flex-1">구사 재경기에 {rejoin.fee.toLocaleString("ko-KR")}P 내고 다시 들어갈까요?</p>
+            <button className="btn-main px-5 py-2" disabled={busy} onClick={() => run("rejoin", { join: true })}>
+              참여
+            </button>
+            <button className="btn-ghost px-5 py-2" disabled={busy} onClick={() => run("rejoin", { join: false })}>
+              안 함
+            </button>
+          </div>
+        )}
+
+        {view.legal.length > 0 && (
+          <div className="flex w-full flex-wrap gap-2">
+            {view.legal.map((a) => (
+              <button
+                key={a}
+                className={`${a === "die" ? "btn-ghost" : "btn-main"} min-w-20 flex-1 py-3 text-lg`}
+                disabled={busy}
+                onClick={() => run("act", { action: a, expectedSeq: view.seq })}
+              >
+                {ACTION_LABEL[a]}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!mySeat && view.room.status !== "closed" && view.seats.length < view.room.maxSeats && (
+          <div className="panel flex w-full flex-wrap items-end gap-3 p-4">
+            <label className="flex flex-col gap-1 text-sm">
+              가져갈 포인트 (최소 {minBuyIn.toLocaleString("ko-KR")}P)
+              <input
+                className="field w-40"
+                type="number"
+                min={minBuyIn}
+                value={buyIn ?? minBuyIn * 5}
+                onChange={(e) => setBuyIn(Number(e.target.value))}
+              />
+            </label>
+            <button className="btn-main px-6 py-2.5" disabled={busy} onClick={() => run("sit", { buyIn: buyIn ?? minBuyIn * 5 })}>
+              앉기
+            </button>
+          </div>
+        )}
+
+        {mySeat && isHost && (view.phase === "idle" || view.phase === "between") && (
+          <button className="btn-main px-6 py-2.5" disabled={busy} onClick={() => run("start")}>
+            {view.phase === "between" ? "바로 다음 판" : "시작"}
+          </button>
+        )}
+        {mySeat && (
+          <button className="btn-ghost px-4 py-2.5" disabled={busy || mySeat.status === "away"} onClick={() => run("stand")}>
+            {mySeat.status === "away" ? "이번 판 끝나면 일어서요" : "일어서기"}
+          </button>
+        )}
+      </section>
+
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-bust">
+          {error}
+        </p>
+      )}
+    </main>
+  );
+}
+
+function Badge({ children, tone }: { children: React.ReactNode; tone?: "accent" | "win" }) {
+  const cls = tone === "accent" ? "border-accent text-accent" : tone === "win" ? "border-win text-win" : "border-line text-muted";
+  return <span className={`rounded border px-1.5 py-0.5 ${cls}`}>{children}</span>;
+}
