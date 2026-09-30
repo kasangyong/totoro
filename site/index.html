@@ -1,0 +1,198 @@
+<title>배팅 할래 말래</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="theme.css">
+<style>
+/* Layout: 로고와 지갑 → 오늘의 보너스 → 게임 카드 3열(테이블 위 플레이스카드) → 내 기록 표 */
+*{box-sizing:border-box}
+body{font-size:14px;line-height:1.5}
+.app{max-width:1120px;margin:0 auto;padding-inline:16px;padding-block:20px 56px;display:flex;flex-direction:column;gap:28px}
+
+.head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-bottom:18px;border-bottom:1px solid color-mix(in srgb,var(--accent) 28%,transparent)}
+.logo{display:flex;flex-direction:column;gap:2px}
+.logo h1{margin:0;font-family:var(--logo);font-weight:400;font-size:clamp(34px,6vw,54px);line-height:1;color:var(--accent);
+  text-shadow:0 2px 0 #6f5217,0 6px 18px rgba(0,0,0,.45);letter-spacing:.01em;word-break:keep-all;text-wrap:balance}
+.logo h1 i{font-style:normal;color:var(--fg);font-size:.55em;vertical-align:middle;margin:0 .15em;opacity:.8}
+.logo p{margin:0;color:var(--muted);font-size:13px}
+.wallet b{font-size:24px}
+.wallet .lbl{color:var(--muted);font-size:12px}
+
+.bonus{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.slip{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:14px;border:1px dashed var(--gold-dim);background:rgba(0,0,0,.2)}
+.slip div{min-width:0}
+.slip b{display:block;font-size:15px}
+.slip span{color:var(--muted);font-size:12px}
+.slip button{flex:none;border:0;border-radius:999px;padding:9px 16px;font:inherit;font-weight:700;cursor:pointer;background:var(--accent);color:var(--accent-ink)}
+.slip button:disabled{background:rgba(0,0,0,.3);color:var(--muted);cursor:default}
+
+h2{margin:0 0 14px;font-size:13px;font-weight:700}
+.games{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+@media (max-width:900px){.games{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:540px){.games{grid-template-columns:minmax(0,1fr)}}
+.game{position:relative;display:flex;flex-direction:column;gap:10px;padding:16px 16px 14px;border-radius:16px;text-decoration:none;color:var(--fg);
+  background:radial-gradient(120% 90% at 50% 0%,var(--felt-hi),var(--felt) 60%,color-mix(in srgb,var(--felt) 70%,#000));
+  border:1px solid var(--gold-dim);box-shadow:inset 0 0 0 4px rgba(0,0,0,.18),inset 0 0 0 5px rgba(228,182,80,.18),0 10px 24px rgba(0,0,0,.35);
+  transition:transform .12s,box-shadow .12s}
+.game:hover{transform:translateY(-3px);box-shadow:inset 0 0 0 4px rgba(0,0,0,.18),inset 0 0 0 5px rgba(228,182,80,.4),0 16px 30px rgba(0,0,0,.45)}
+.game:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.art{height:96px;border-radius:10px;background:rgba(0,0,0,.22);display:grid;place-items:center}
+.art svg{width:100%;height:100%;display:block}
+.name{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.name b{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.08em}
+.name span{font-size:12px;color:var(--muted)}
+.game p{margin:0;color:var(--muted);font-size:13px;min-height:2.9em}
+.tags{display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:rgba(0,0,0,.2)}
+.tag.max{border-color:var(--gold-dim);color:var(--accent);font-family:var(--display);font-size:12px;letter-spacing:.03em}
+.game.soon{cursor:default;opacity:.62}
+.game.soon:hover{transform:none}
+.soonmark{position:absolute;top:12px;right:12px;font-size:11px;font-weight:700;color:var(--accent-ink);background:var(--accent);border-radius:999px;padding:2px 8px}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:rgba(0,0,0,.2)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:10px 14px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-size:12px;font-weight:500;color:var(--muted);border-bottom:1px solid var(--line)}
+td{font-family:var(--display);font-size:15px}
+td:first-child{font-family:var(--body);font-size:14px}
+tr+tr td{border-top:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
+tfoot td{border-top:1px solid var(--gold-dim)!important;color:var(--accent)}
+.w{color:var(--win)} .l{color:var(--bust)} .m{color:var(--muted)}
+.foot{color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:4px}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--panel);border:1px solid var(--win);color:var(--win);border-radius:10px;padding:8px 14px;font-weight:500;z-index:5}
+@media (prefers-reduced-motion:reduce){.game{transition:none}.game:hover{transform:none}}
+</style>
+
+<div class="app">
+  <header class="head">
+    <div class="logo">
+      <h1>배팅 <i>♠</i> 할래 <i>♦</i> 말래</h1>
+      <p>우리끼리 가상 포인트로 즐기는 게임장 · 실제 돈은 쓰지 않아요</p>
+    </div>
+    <div class="wallet"><span class="lbl">보유</span><b id="bal">10,000</b><span>P</span></div>
+  </header>
+
+  <section class="bonus" aria-label="보너스">
+    <div class="slip">
+      <div><b>오늘 출석 보너스 500P</b><span id="dailyNote">하루에 한 번 받을 수 있어요</span></div>
+      <button id="daily" type="button">받기</button>
+    </div>
+    <div class="slip">
+      <div><b>파산 구제금 1,000P</b><span id="rescueNote">보유 포인트가 10P보다 적을 때 받을 수 있어요</span></div>
+      <button id="rescue" type="button">받기</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>게임 고르기</h2>
+    <div class="games" id="games"></div>
+  </section>
+
+  <section>
+    <h2>내 기록</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>게임</th><th>참여한 판</th><th>총 수익</th><th>최고 배율</th></tr></thead>
+        <tbody id="rec"></tbody>
+        <tfoot><tr><td>전체</td><td id="tRounds">0</td><td id="tProfit">0</td><td id="tBest">—</td></tr></tfoot>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>모든 게임의 기대 환급률은 99%예요. 오래 할수록 포인트는 조금씩 줄어요.</span>
+    <span>지금은 결과를 이 브라우저에서 정하는 데모예요. 포인트와 기록도 이 브라우저에만 저장돼요.</span>
+  </footer>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.floor(n).toLocaleString('ko-KR');
+  const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
+  const fmtMult = m => (m >= 1000 ? fmt(m) : (Math.floor(m * 100) / 100).toFixed(2)) + '×';
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+
+  // 게임 카드 그림: 금색·크림색 선으로 그린 작은 도식
+  const G = 'var(--accent)', F = 'var(--fg)', R = 'var(--bust)', W = 'var(--win)';
+  const ART = {
+    crash: `<svg viewBox="0 0 200 96"><path d="M16 84 H188 M16 84 V10" stroke="${F}" stroke-opacity=".25"/><path d="M16 84 C80 82 120 70 150 40 S178 14 184 12" fill="none" stroke="${G}" stroke-width="4" stroke-linecap="round"/><circle cx="184" cy="12" r="6" fill="${G}"/><text x="100" y="56" fill="${F}" font-family="Oswald" font-size="22" font-weight="700" text-anchor="middle">4.20×</text></svg>`,
+    mines: `<svg viewBox="0 0 200 96">${[0,1,2,3,4].map(c=>[0,1,2].map(r=>{const x=46+c*23,y=12+r*25,k=c*3+r;const fill=k===4||k===9?W:k===7?R:'rgba(0,0,0,.35)';return `<rect x="${x}" y="${y}" width="19" height="19" rx="4" fill="${fill}" fill-opacity="${k===4||k===9||k===7?.9:1}" stroke="${F}" stroke-opacity=".18"/>`}).join('')).join('')}</svg>`,
+    plinko: `<svg viewBox="0 0 200 96">${[0,1,2,3,4].map(r=>Array.from({length:r+3},(_,j)=>`<circle cx="${100+(j-(r+2)/2)*20}" cy="${12+r*14}" r="2.6" fill="${F}" fill-opacity=".6"/>`).join('')).join('')}${[0,1,2,3,4,5].map(i=>`<rect x="${47+i*18}" y="80" width="15" height="10" rx="2" fill="${i===0||i===5?R:i===1||i===4?G:'rgba(0,0,0,.4)'}"/>`).join('')}<circle cx="110" cy="40" r="5" fill="${G}"/></svg>`,
+    chicken: `<svg viewBox="0 0 200 96"><rect x="0" y="0" width="200" height="96" fill="#1b2230"/>${[50,90,130,170].map(x=>`<path d="M${x} 0 V96" stroke="#fff" stroke-opacity=".3" stroke-dasharray="10 10"/>`).join('')}<rect x="0" y="0" width="30" height="96" fill="#3a4462"/><rect x="118" y="6" width="24" height="36" rx="6" fill="#6aa5ff"/><ellipse cx="70" cy="60" rx="13" ry="11" fill="#f7f3e8"/><circle cx="73" cy="48" r="4" fill="${R}"/><path d="M82 57 l7 3 -7 3z" fill="${G}"/><text x="110" y="66" fill="${G}" font-family="Oswald" font-size="15" font-weight="700" text-anchor="middle">1.65×</text></svg>`,
+    hilo: `<svg viewBox="0 0 200 96"><rect x="52" y="10" width="44" height="62" rx="6" fill="#fbf7ec"/><text x="74" y="50" fill="#c9242f" font-family="Oswald" font-size="26" font-weight="700" text-anchor="middle">7</text><rect x="106" y="10" width="44" height="62" rx="6" fill="${G}"/><rect x="111" y="15" width="34" height="52" rx="4" fill="none" stroke="#2b1d04" stroke-opacity=".4"/><text x="100" y="90" fill="${F}" font-family="Oswald" font-size="14" text-anchor="middle">▲ HI · LO ▼</text></svg>`,
+    dice: `<svg viewBox="0 0 200 96"><rect x="72" y="14" width="56" height="56" rx="12" fill="#fbf7ec"/>${[[86,28],[114,28],[100,42],[86,56],[114,56]].map(([x,y])=>`<circle cx="${x}" cy="${y}" r="5" fill="#1c2030"/>`).join('')}<rect x="30" y="80" width="84" height="6" rx="3" fill="${W}"/><rect x="114" y="80" width="56" height="6" rx="3" fill="${R}"/></svg>`,
+    limbo: `<svg viewBox="0 0 200 96"><text x="100" y="58" fill="${W}" font-family="Oswald" font-size="40" font-weight="700" text-anchor="middle">12.48×</text><text x="100" y="82" fill="${F}" fill-opacity=".6" font-family="IBM Plex Sans KR" font-size="12" text-anchor="middle">목표 10.00× 이상</text></svg>`,
+    wheel: `<svg viewBox="0 0 200 96">${Array.from({length:10},(_,k)=>{const a0=(k*36-90)*Math.PI/180,a1=((k+1)*36-90)*Math.PI/180,r=40,cx=100,cy=50;const c=[R,'rgba(0,0,0,.4)',G,'rgba(0,0,0,.4)','#6aa5ff','rgba(0,0,0,.4)',G,'rgba(0,0,0,.4)',W,'rgba(0,0,0,.4)'][k];return `<path d="M${cx} ${cy} L${cx+r*Math.cos(a0)} ${cy+r*Math.sin(a0)} A${r} ${r} 0 0 1 ${cx+r*Math.cos(a1)} ${cy+r*Math.sin(a1)}Z" fill="${c}" stroke="#08221b" stroke-width="1.5"/>`}).join('')}<path d="M100 16 l-6 -12 h12z" fill="${F}"/><circle cx="100" cy="50" r="12" fill="#08221b"/></svg>`,
+    predict: `<svg viewBox="0 0 200 96"><rect x="46" y="14" width="108" height="50" rx="12" fill="rgba(0,0,0,.35)" stroke="${G}" stroke-opacity=".6"/><path d="M80 64 l-8 14 18 -14z" fill="rgba(0,0,0,.35)"/><text x="100" y="47" fill="${G}" font-family="Oswald" font-size="28" font-weight="700" text-anchor="middle">?</text></svg>`
+  };
+  const GAMES = [
+    { id: 'crash', href: 'crash.html', name: 'CRASH', ko: '크래시', desc: '배율이 오르다 터져요. 터지기 전에 빼면 이겨요.', max: '최대 100만×', kind: '타이밍' },
+    { id: 'mines', href: 'mines.html', name: 'MINES', ko: '지뢰찾기', desc: '지뢰를 피해 보석을 열수록 배율이 올라가요.', max: '최대 500만×', kind: '멈출 타이밍' },
+    { id: 'plinko', href: 'plinko.html', name: 'PLINKO', ko: '플링코', desc: '공이 핀에 튕기며 떨어져 아래 칸 배율만큼 받아요.', max: '최대 1,000×', kind: '구경하는 맛' },
+    { id: 'chicken', href: 'chicken.html', name: 'CHICKEN', ko: '치킨 크로싱', desc: '닭이 차선을 하나씩 건널수록 배율이 올라가요.', max: '최대 2,100×', kind: '멈출 타이밍' },
+    { id: 'hilo', href: 'hilo.html', name: 'HILO', ko: '하이로우', desc: '다음 카드가 높을지 낮을지 연속으로 맞혀요.', max: '연승할수록 곱해짐', kind: '연승' },
+    { id: 'dice', href: 'quick.html#dice', name: 'DICE', ko: '다이스', desc: '목표 숫자보다 작게 또는 크게. 0.5초면 결과가 나와요.', max: '최대 49.5×', kind: '한 방' },
+    { id: 'limbo', href: 'quick.html#limbo', name: 'LIMBO', ko: '림보', desc: '목표 배율을 정하고 그 이상이 나오면 이겨요.', max: '최대 100만×', kind: '한 방' },
+    { id: 'wheel', href: 'quick.html#wheel', name: 'WHEEL', ko: '돌림판', desc: '돌림판을 돌려 화살표가 가리키는 배율만큼 받아요.', max: '최대 29.7×', kind: '한 방' },
+  ];
+  $('games').innerHTML = GAMES.map(g => `
+    <a class="game" href="${g.href}">
+      <div class="art">${ART[g.id]}</div>
+      <div class="name"><b>${g.name}</b><span>${g.ko}</span></div>
+      <p>${g.desc}</p>
+      <div class="tags"><span class="tag max">${g.max}</span><span class="tag">${g.kind}</span></div>
+    </a>`).join('') + `
+    <div class="game soon" aria-disabled="true">
+      <span class="soonmark">준비 중</span>
+      <div class="art">${ART.predict}</div>
+      <div class="name"><b>PREDICT</b><span>친구 예측 베팅</span></div>
+      <p>친구들이 주제를 만들고 거는 게임이에요. 서버가 생기면 열려요.</p>
+      <div class="tags"><span class="tag max">배당은 건 사람끼리</span><span class="tag">우리끼리</span></div>
+    </div>`;
+
+  // 지갑 · 보너스
+  let bal = store.get('bhmh.bal', 10000);
+  const today = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+  let toastTimer = 0;
+  function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2200); }
+  function renderWallet() {
+    $('bal').textContent = fmt(bal);
+    const took = store.get('bhmh.daily', '') === today();
+    $('daily').disabled = took; $('daily').textContent = took ? '받았어요' : '받기';
+    $('dailyNote').textContent = took ? '내일 다시 받을 수 있어요' : '하루에 한 번 받을 수 있어요';
+    $('rescue').disabled = bal >= 10;
+  }
+  $('daily').addEventListener('click', () => {
+    if (store.get('bhmh.daily', '') === today()) return;
+    bal += 500; store.set('bhmh.bal', bal); store.set('bhmh.daily', today()); toast('출석 보너스 500P를 받았어요'); renderWallet();
+  });
+  $('rescue').addEventListener('click', () => {
+    if (bal >= 10) return;
+    bal += 1000; store.set('bhmh.bal', bal); toast('구제금 1,000P를 받았어요'); renderWallet();
+  });
+
+  // 내 기록: 게임마다 저장된 통계를 모아서 보여 줌
+  const REC = [['crash', 'Crash'], ['mines', 'Mines'], ['plinko', 'Plinko'], ['chicken', '치킨 크로싱'], ['hilo', 'HiLo'], ['quick', 'Dice · Limbo · Wheel']];
+  function renderRecords() {
+    let tr = 0, tp = 0, tb = 0;
+    $('rec').innerHTML = REC.map(([k, label]) => {
+      const s = store.get(k + '.stats', null) || { rounds: 0, profit: 0, best: 0 };
+      tr += s.rounds || 0; tp += s.profit || 0; tb = Math.max(tb, s.best || 0);
+      const pc = s.profit > 0 ? 'w' : s.profit < 0 ? 'l' : 'm';
+      return `<tr><td>${label}</td><td>${s.rounds ? fmt(s.rounds) : '<span class="m">0</span>'}</td><td class="${pc}">${signed(s.profit || 0)}</td><td>${s.best ? fmtMult(s.best) : '<span class="m">—</span>'}</td></tr>`;
+    }).join('');
+    $('tRounds').textContent = fmt(tr);
+    $('tProfit').textContent = signed(tp);
+    $('tBest').textContent = tb ? fmtMult(tb) : '—';
+  }
+
+  renderWallet(); renderRecords();
+  addEventListener('pageshow', e => { if (e.persisted) { bal = store.get('bhmh.bal', 10000); renderWallet(); renderRecords(); } });
+})();
+</script>
