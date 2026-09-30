@@ -208,11 +208,11 @@ export function splitPot(amount: number, winnerIds: readonly string[], seats: re
 export function awardPots(
   pots: readonly Pot[],
   seats: readonly Seat[],
-  winnersOf: (eligible: readonly string[]) => string[],
+  winnersOf: (eligible: readonly string[], potIndex: number) => string[],
 ): Map<string, number> {
   const totals = new Map<string, number>();
-  for (const pot of pots) {
-    const winners = winnersOf(pot.eligible);
+  for (const [i, pot] of pots.entries()) {
+    const winners = winnersOf(pot.eligible, i);
     if (winners.some((id) => !pot.eligible.includes(id))) throw new BettingError("winner not eligible for pot");
     for (const [id, amt] of splitPot(pot.amount, winners, seats)) {
       totals.set(id, (totals.get(id) ?? 0) + amt);

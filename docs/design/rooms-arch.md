@@ -20,8 +20,9 @@
 | C. Supabase Edge Function(Deno) | DB와 가까움 | 런타임 추가, 코드 공유 번거로움 |
 
 **추천: B.**
-- 엔진 = `app/lib/engine` 순수 함수 (별도 패키지 없이 Next 앱 안에 둠) `reduce(state, action) → { state, effects }`. 부수효과 없음, 시각은 action에 담겨 들어옴.
-- **시드는 private state 안에 보관**(`state.secrets.server_seed`, `client_seeds`)하고 reduce가 딜·재경기 셔플을 직접 수행 → `replay(seeds, action_log)`는 같은 reduce를 처음부터 다시 돌리기만 하면 됨. 공개 응답은 `viewFor`가 `secrets`를 제거.
+- 엔진 = `app/lib/engine` 순수 함수 (별도 패키지 없이 Next 앱 안에 둠) `reduce(state, action) → state`. 부수효과 없음, 시각은 action에 담겨 들어옴.
+- **판 생성 시 시드로 재경기분까지 덱을 미리 섞어 `state.secrets.decks`에 보관**하고 reduce는 그 덱에서 딜만 함 (시드 원본은 `hand_secrets`). 검증은 `createHand(seeds) → replay(action_log)`로 같은 경로를 다시 돌림. 공개 응답은 `viewFor`가 `secrets`를 제거.
+- reduce는 새 상태만 반환. 공개 이벤트는 Route Handler가 이전·다음 상태의 `viewFor(null)` 차이와 액션으로 만든다.
 - `POST /api/rooms/[id]/action`:
   1. `auth.getUser()`로 사용자 확인 (body의 user id 무시). 행동 주체 = 그 사용자의 좌석.
   2. `postgres(url, { prepare: false, max: 1, idle_timeout: 20 })`, Supavisor **트랜잭션 모드 포트 6543**. Vercel 함수 리전 = Supabase 리전.
@@ -137,7 +138,7 @@
 - 다음 판: 판 종료 5초 후, 앉아 있는 사람 2명 이상이면 시작. 이때 `room_seats.last_seen_at`이 최근 60초 안인 좌석만 참가(나머지는 일어섬·반환).
 - 갱신 규칙: `last_seen_at` = 그 좌석 사용자의 state 조회·action·tick마다 (state GET은 이 컬럼 하나만 씀, 30초에 1번으로 제한). `rooms.last_activity_at` = action·tick·착석·일어서기마다.
 - **방치된 방 청소 (`pg_cron` 매 1분, SQL만):** `rooms.last_activity_at < now() − 10분`이고 `closed`가 아니면 `private.close_abandoned_room(room)` — 엔진과 **같은 잠금 순서**(`room_state FOR UPDATE` → `room_seats` → `profiles`), 잠근 뒤 조건 재확인, 끝에 `room_state.seq` 증가 + 종료 상태 기록(늦게 온 action/tick은 409):
-  1. 진행 중 판 **무효**: 각 좌석 `stack += hand_contrib`, `hand_contrib = 0` (팟 반환), 판 결과 `void` 기록.
+  1. 진행 중 판 **무효**: 각 좌석 `stack = hand_start_stack` (판 시작 시점 스택으로 되돌림 — 재경기 이월 팟·먼저 지급분까지 한 번에 원상복구), `hand_contrib = 0`, 판 결과 `void` 기록. `room_seats.hand_start_stack`은 판 시작 트랜잭션에서 기록.
   2. 전 좌석 `table_cashout(stack)` → 좌석 비움.
   3. `rooms.status = 'closed'`, 이벤트 발행.
   - TS 엔진 불필요 (좌석 행에 스택·기여가 있으므로).
@@ -160,7 +161,7 @@
 | 테이블 | 스키마 | 내용 | 쓰기 |
 |---|---|---|---|
 | `rooms` | public | id, game, base_bet, max_seats, host_id, status, last_activity_at | `engine_rw`만 (클라이언트 insert/update 정책 없음) |
-| `room_seats` | public | room_id, seat_no, user_id, seat_session_id, stack, hand_contrib, status(`sitting`,`away`), last_seen_at. unique `(room_id, seat_no)`, unique `(room_id, user_id)` | `engine_rw`만 |
+| `room_seats` | public | room_id, seat_no, user_id, seat_session_id, stack, hand_contrib, hand_start_stack, status(`sitting`,`away`), last_seen_at. unique `(room_id, seat_no)`, unique `(room_id, user_id)` | `engine_rw`만 |
 | `room_events` | public | room_id, seq, kind, public_payload | `engine_rw`만 insert, 삭제·수정 금지 |
 | `hands` | public | id, room_id, hand_no, commit_hash, status, result, revealed(jsonb, 종료 후에만 채움) | `engine_rw`만 |
 | `room_state` | private | room_id, seq, state(jsonb), turn_deadline | `engine_rw`만 |
