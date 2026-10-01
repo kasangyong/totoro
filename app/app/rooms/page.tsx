@@ -39,7 +39,7 @@ export default async function RoomsPage() {
                 <div>
                   <p className="font-bold">{r.name}</p>
                   <p className="text-xs text-muted">
-                    {r.game === "poker7" ? "7포커" : "섯다"} · 기본금 {r.base_bet.toLocaleString("ko-KR")}P · {r.status === "playing" ? "진행 중" : "대기 중"}
+                    {r.game === "poker7" ? "7포커" : r.game === "blackjack" ? "블랙잭" : "섯다"} · 기본금 {r.base_bet.toLocaleString("ko-KR")}P · {r.status === "playing" ? "진행 중" : "대기 중"}
                   </p>
                 </div>
                 <span className="font-display text-xl text-accent">

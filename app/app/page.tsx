@@ -60,6 +60,13 @@ export default async function Lobby() {
           </div>
           <p className="mt-2 text-sm text-muted">초이스 룰 세븐포커. 4장 받아 1장 버리고 1장 공개, 히든까지.</p>
         </Link>
+        <Link href="/rooms" className="panel block p-5 transition hover:-translate-y-0.5">
+          <div className="flex items-baseline justify-between">
+            <span className="font-display text-2xl tracking-widest">BLACKJACK</span>
+            <span className="text-sm text-muted">블랙잭</span>
+          </div>
+          <p className="mt-2 text-sm text-muted">딜러와 21 대결. 혼자서도, 여럿이도. 블랙잭 3:2.</p>
+        </Link>
       </div>
 
       <div className="mt-8 mb-3 flex items-baseline justify-between">

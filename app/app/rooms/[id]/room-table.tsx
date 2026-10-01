@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LegalAction } from "@/lib/rooms/games";
 import type { RoomView } from "@/lib/rooms/service";
 import { supabaseBrowser } from "@/lib/supabase/browser";
+import { BjDealer, BjMine, BjOthers, BjResultLine, BjRules, totalLabel } from "./blackjack-stage";
 import { HwatuCard } from "./hwatu-card";
 import { HandRanks, myHandLabel } from "./hand-ranks";
 import { PlayingCard } from "./playing-card";
@@ -142,16 +143,21 @@ export function RoomTable({ roomId }: { roomId: string }) {
 
   const me = view.me;
   const mySeat = view.seats.find((s) => s.userId === me);
-  // 블랙잭 무대는 BJ3에서 따로 그린다. 여기서는 섯다·포커만.
+  // 섯다·포커는 game, 블랙잭은 bj (블랙잭 무대는 blackjack-stage.tsx)
   const game = view.game && view.game.game !== "blackjack" ? view.game : null;
+  const isBJ = view.room.game === "blackjack";
+  const bj = view.game?.game === "blackjack" ? view.game : null;
+  const bjMine = bj?.seats.find((s) => s.id === me);
+  // 내 점수: 스플릿했으면 손마다
+  const bjTotal = bjMine?.hands.some((h) => h.cards.length > 0) ? bjMine.hands.map((h) => totalLabel(h.cards)).join(" / ") : null;
   const remaining = view.deadline ? Math.max(0, new Date(view.deadline).getTime() - now) : null;
-  // 단계별 제한 시간 (lib/rooms/service.ts의 SEED_MS·TURN_MS·REJOIN_MS·BETWEEN_MS와 같게)
+  // 단계별 제한 시간 (lib/rooms/service.ts의 SEED_MS·TURN_MS·REJOIN_MS·CHOICE_MS·BET_MS·BETWEEN_MS와 같게)
   const totalMs =
     view.phase === "seeding" || view.phase === "between"
       ? 5000
       : view.game?.phase === "rejoin"
         ? 10000
-        : view.game?.phase === "choice"
+        : view.game?.phase === "choice" || bj?.phase === "bet"
           ? 15000
           : 20000;
   const isHost = view.room.hostId === me;
@@ -160,7 +166,9 @@ export function RoomTable({ roomId }: { roomId: string }) {
   const Card = view.room.game === "poker7" ? PlayingCard : HwatuCard;
   const pot = game
     ? game.seats.reduce((a, s) => a + s.handContrib, 0) + (sutda ? sutda.carried.reduce((a, p) => a + p.amount, 0) : 0)
-    : 0;
+    : bj && bj.phase !== "done"
+      ? bj.seats.reduce((a, s) => a + s.committed, 0)
+      : 0;
   const bossId = sutda ? sutda.bossId : poker && poker.phase !== "choice" ? poker.round.bossId : null;
   const choosing = poker?.phase === "choice" && poker.seats.some((s) => s.id === me) && !poker.chosen.includes(me);
   // 선택은 판마다 새로 (다른 판에서 누른 카드가 남지 않게)
@@ -188,11 +196,17 @@ export function RoomTable({ roomId }: { roomId: string }) {
             ? `초이스 · 버릴 카드와 공개할 카드를 고르는 중 (${poker.chosen.length}/${poker.seats.length})`
             : view.phase === "playing" && poker?.phase === "bet"
               ? `${poker.street}구${poker.street === 7 ? " (히든)" : ""} 베팅`
-              : view.phase === "between"
-                ? "판이 끝났어요"
-                : view.phase === "idle"
-                  ? "2명 이상 앉으면 방장이 시작할 수 있어요"
-                  : PHASE_LABEL[view.phase];
+              : view.phase === "playing" && bj?.phase === "bet"
+                ? `베팅 · 금액을 정하는 중 (${bj.seats.filter((s) => s.status !== "waiting").length}/${bj.seats.length})`
+                : view.phase === "playing" && bj?.phase === "play"
+                  ? `${view.seats.find((s) => s.userId === bj.toAct?.seatId)?.username ?? ""} 차례`
+                  : view.phase === "between"
+                    ? "판이 끝났어요"
+                    : view.phase === "idle"
+                      ? isBJ
+                        ? "앉으면 방장이 시작할 수 있어요 (혼자서도 돼요)"
+                        : "2명 이상 앉으면 방장이 시작할 수 있어요"
+                      : PHASE_LABEL[view.phase];
 
   const seatBadges = (userId: string, turn: boolean) => {
     const gs = gameSeat(userId);
@@ -214,7 +228,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
     );
   };
   const isTurn = (id: string) =>
-    game?.round.toActId === id && game.phase !== "done" && game.phase !== "rejoin" && game.phase !== "choice";
+    bj ? bj.toAct?.seatId === id : game?.round.toActId === id && game.phase !== "done" && game.phase !== "rejoin" && game.phase !== "choice";
 
   return (
     // 데스크톱은 화면 높이에 딱 맞춘다 (스크롤 없이 한 화면). 모바일은 내용만큼 늘어나되 조작부는 아래에 붙는다.
@@ -226,7 +240,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
         <div className="min-w-0 flex-1 text-center">
           <h1 className="truncate font-bold">{view.room.name}</h1>
           <p className="truncate text-xs text-muted">
-            {view.room.game === "poker7" ? "7포커" : "섯다"} · 기본금 {view.room.baseBet.toLocaleString("ko-KR")}P ·{" "}
+            {view.room.game === "poker7" ? "7포커" : isBJ ? "블랙잭" : "섯다"} · 기본금 {view.room.baseBet.toLocaleString("ko-KR")}P ·{" "}
             {view.handNo > 0 ? `${view.handNo}번째 판` : "첫 판 전"}
           </p>
         </div>
@@ -241,7 +255,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
           <div className="flex items-end justify-between gap-3">
             <p className="text-sm text-muted">{status}</p>
             <div className="text-right leading-none">
-              <p className="text-[11px] text-muted">판돈</p>
+              <p className="text-[11px] text-muted">{isBJ ? "건 돈" : "판돈"}</p>
               <p className="font-display text-3xl text-accent">{pot.toLocaleString("ko-KR")}</p>
             </div>
           </div>
@@ -259,7 +273,14 @@ export function RoomTable({ roomId }: { roomId: string }) {
             )}
           </div>
 
-          {/* 다른 사람 자리 */}
+          {/* 다른 사람 자리 (블랙잭은 위에 딜러) */}
+          {isBJ ? (
+            // 데스크톱: 딜러 | 다른 사람들 한 줄 (세로 공간 절약)
+            <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
+              {bj && (view.phase === "playing" || view.phase === "between") && <BjDealer game={bj} />}
+              <BjOthers view={view} game={bj} badges={seatBadges} />
+            </div>
+          ) : (
           <ul className="grid min-h-0 flex-1 auto-rows-min content-start gap-2 overflow-auto sm:grid-cols-2 xl:grid-cols-3">
             {others.map((s) => {
               const gs = gameSeat(s.userId);
@@ -288,8 +309,19 @@ export function RoomTable({ roomId }: { roomId: string }) {
             })}
             {others.length === 0 && <li className="text-sm text-muted">아직 다른 사람이 없어요. 방 주소를 친구에게 보내 주세요.</li>}
           </ul>
+          )}
 
           {/* 판 결과 */}
+          {view.phase === "between" && bj?.result && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-black/25 px-3 py-2 text-sm">
+              <BjResultLine view={view} game={bj} />
+              {view.handId && (
+                <Link href={`/verify/${view.handId}`} className="text-accent underline">
+                  이 판 검증하기
+                </Link>
+              )}
+            </div>
+          )}
           {result && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-black/25 px-3 py-2 text-sm">
               <p>
@@ -323,7 +355,9 @@ export function RoomTable({ roomId }: { roomId: string }) {
                 <span className="font-display text-xl text-accent">{mySeat.stack.toLocaleString("ko-KR")}</span>
               </div>
 
-              {choosing && poker ? (
+              {bj ? (
+                view.players.includes(me) && <BjMine key={view.handId} view={view} game={bj} busy={busy} run={run} />
+              ) : choosing && poker ? (
                 <div className="mt-2 grid justify-items-center gap-2">
                   <p className="text-sm">
                     {pick.discard === null ? "버릴 카드를 누르세요" : pick.open === null ? "공개할 카드를 누르세요" : "이대로 할까요?"}
@@ -396,7 +430,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
               )}
 
               {/* 베팅 버튼은 모두 같은 모양 (다이도 같은 색) */}
-              {myTurn && (
+              {myTurn && !bj && (
                 <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-7">
                   {view.legal.map((a) => (
                     <button
@@ -467,6 +501,21 @@ export function RoomTable({ roomId }: { roomId: string }) {
               </summary>
               <div className="mt-2">
                 <HandRanks game={game.game} myCards={myCards} />
+              </div>
+            </details>
+          </>
+        )}
+        {isBJ && mySeat && (
+          <>
+            <div className="hidden min-h-0 overflow-auto lg:block">
+              <BjRules myTotal={bjTotal} />
+            </div>
+            <details className="panel p-3 lg:hidden">
+              <summary className="cursor-pointer text-sm font-bold text-accent">
+                규칙 보기{bjTotal ? ` · 내 점수: ${bjTotal}` : ""}
+              </summary>
+              <div className="mt-2">
+                <BjRules myTotal={null} />
               </div>
             </details>
           </>

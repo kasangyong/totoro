@@ -41,7 +41,7 @@ export default async function VerifyPage(props: PageProps<"/verify/[handId]">) {
           handId={hand.id}
           handNo={hand.hand_no}
           commit={hand.commit_hash}
-          result={hand.result as { payouts: Record<string, number> }}
+          result={hand.result as { payouts: Record<string, number>; hands?: unknown; dealer?: unknown }}
           revealed={hand.revealed as RevealedHand}
           me={user.id}
         />

@@ -116,8 +116,9 @@ export function PlayingCard({ card, small, selected }: { card: number | null; sm
       />
     );
   }
-  const rank = rankOf(card);
-  const suitIdx = suitOf(card);
+  // 블랙잭은 6덱(0~311)이라 52로 나눈 나머지가 실제 카드
+  const rank = rankOf(card % 52);
+  const suitIdx = suitOf(card % 52);
   const suit = SUITS[suitIdx];
   const red = suitIdx === 1 || suitIdx === 2;
   const face = FACE[rank] ?? String(rank);

@@ -5,7 +5,7 @@ import { useState, type FormEvent } from "react";
 
 export function CreateRoomForm() {
   const router = useRouter();
-  const [game, setGame] = useState<"sutda" | "poker7">("sutda");
+  const [game, setGame] = useState<"sutda" | "poker7" | "blackjack">("sutda");
   const [name, setName] = useState("한 판 하자");
   const [baseBet, setBaseBet] = useState(100);
   const [maxSeats, setMaxSeats] = useState(6);
@@ -31,9 +31,10 @@ export function CreateRoomForm() {
     <form onSubmit={submit} className="panel mt-6 grid gap-3 p-5 sm:grid-cols-[auto_1fr_auto_auto_auto] sm:items-end">
       <label className="flex flex-col gap-1 text-sm">
         게임
-        <select className="field" value={game} onChange={(e) => setGame(e.target.value as "sutda" | "poker7")}>
+        <select className="field" value={game} onChange={(e) => setGame(e.target.value as "sutda" | "poker7" | "blackjack")}>
           <option value="sutda">섯다</option>
           <option value="poker7">7포커</option>
+          <option value="blackjack">블랙잭</option>
         </select>
       </label>
       <label className="flex flex-col gap-1 text-sm">
