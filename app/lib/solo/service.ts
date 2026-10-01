@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { commitOf, isValidClientSeed, RNG_VERSION, type Rng } from "../engine/rng";
 import {
   CHICKEN,
+  MAX_BET,
   MIN_BET,
   chickenDeathLane,
   chickenMult100,
@@ -85,6 +86,7 @@ async function takeNonce(ctx: Ctx): Promise<{ rng: Rng; nonce: number }> {
 
 function checkBet(bet: number) {
   if (!Number.isSafeInteger(bet) || bet < MIN_BET) throw new GameError(`${MIN_BET}P 이상부터 걸 수 있어요.`);
+  if (bet > MAX_BET) throw new GameError(`한 판에 최대 ${MAX_BET.toLocaleString("ko-KR")}P까지 걸 수 있어요.`);
 }
 
 async function balanceOf(tx: Tx, userId: string): Promise<number> {
@@ -222,7 +224,7 @@ export async function startSession(userId: string, game: SessionGame, bet: numbe
       state = { mines, revealed: [], mult100: 100, next100: minesMult100(mines, 1) } satisfies MinesState;
     } else if (game === "chicken") {
       const difficulty = params.difficulty as ChickenDifficulty;
-      if (!CHICKEN[difficulty]) throw new GameError("난이도가 맞지 않아요.");
+      if (typeof difficulty !== "string" || !Object.hasOwn(CHICKEN, difficulty)) throw new GameError("난이도가 맞지 않아요.");
       clean = { difficulty };
       const deathLane = chickenDeathLane(rng, difficulty);
       secret = { deathLane };
@@ -289,8 +291,10 @@ export async function stepSession(userId: string, game: SessionGame, action: Rec
         return { betId: row.id, state, status: "lost" as const, payout: 0, balance: await balanceOf(ctx.tx, userId) };
       }
       const found = s.revealed.length + 1;
-      const state: MinesState = { ...s, revealed: [...s.revealed, tile], mult100: minesMult100(s.mines, found), next100: minesMult100(s.mines, found + 1) };
-      if (found === 25 - s.mines) return cashoutRow(ctx, { ...row, state: state as SessionRow["state"] }, { ...state, board });
+      const allFound = found === 25 - s.mines;
+      // 마지막 보석이면 다음 칸이 없다 (next100 계산 시 0으로 나누기)
+      const state: MinesState = { ...s, revealed: [...s.revealed, tile], mult100: minesMult100(s.mines, found), next100: allFound ? 0 : minesMult100(s.mines, found + 1) };
+      if (allFound) return cashoutRow(ctx, { ...row, state: state as SessionRow["state"] }, { ...state, board });
       await ctx.tx`update public.solo_bets set state = ${ctx.tx.json(state as never)} where id = ${row.id}`;
       return { betId: row.id, state, status: "active" as const, payout: null, balance: await balanceOf(ctx.tx, userId) };
     }
@@ -300,7 +304,12 @@ export async function stepSession(userId: string, game: SessionGame, action: Rec
     // HiLo
     const s = row.state as HiloState;
     const { cards } = await secretOf<{ cards: HiloCard[] }>(ctx, row.id);
-    if (s.index + 1 >= HILO_MAX_CARDS) throw new GameError("카드를 다 썼어요. 받기를 눌러 주세요.", 409);
+    if (s.index + 1 >= HILO_MAX_CARDS) {
+      // [우리 규칙] 카드를 다 쓰면 판을 끝낸다: 맞힌 게 있으면 그 배율로 지급, 없으면 베팅액 그대로 돌려줌
+      if (s.correct > 0) return cashoutRow(ctx, row, s);
+      await finish(ctx, row, s, row.stake);
+      return { betId: row.id, state: s, status: "won" as const, payout: row.stake, balance: await balanceOf(ctx.tx, userId) };
+    }
     const next = cards[s.index + 1];
     if (action.guess === "skip") {
       const state: HiloState = { ...s, current: next, index: s.index + 1, history: [...s.history, { card: s.current, guess: "skip", hit: null }] };

@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HiLo · 배팅 할래 말래</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: 카드 테이블이 주인공, 오른쪽에 베팅 패널, 아래에 이번 판 카드 기록·최근 게임·규칙 (앞 데모들과 같은 톤) */
+:root{
+  --bg:#0e1322; --panel:#161d31; --raise:#1f2842; --line:#2b3654;
+  --fg:#e9edf7; --muted:#8a95b2;
+  --accent:#ffb23f; --accent-ink:#241600;
+  --win:#3fd49b; --win-ink:#04210f; --bust:#ff5a5f;
+  --card:#f7f4ec; --card-ink:#1b2033; --card-red:#d8323b; --felt:#123a33;
+  --display:"Oswald","IBM Plex Sans KR",system-ui,sans-serif;
+  --body:"IBM Plex Sans KR",system-ui,-apple-system,"Malgun Gothic",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.5}
+.app{max-width:1120px;margin:0 auto;padding-inline:16px;padding-block:16px 48px;display:flex;flex-direction:column;gap:16px}
+
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.12em}
+.brand span{font-family:var(--body);font-weight:500;font-size:12px;letter-spacing:.04em;color:var(--muted);margin-left:8px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;vertical-align:middle}
+.topright{display:flex;align-items:center;gap:10px}
+.wallet{display:flex;align-items:baseline;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 14px}
+.wallet .lbl{color:var(--muted);font-size:12px}
+.wallet b{font-family:var(--display);font-size:20px;font-variant-numeric:tabular-nums;color:var(--accent)}
+.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+.ghost:hover{color:var(--fg)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"stage panel" "trail panel" "hist rules";gap:16px;align-items:start}
+@media (max-width:820px){.grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"stage" "panel" "trail" "hist" "rules"}}
+
+.stage{grid-area:stage;position:relative;border:1px solid var(--line);border-radius:14px;padding:18px 16px 22px;overflow:hidden;
+  background:radial-gradient(90% 80% at 50% 45%,color-mix(in srgb,var(--felt) 90%,#fff 4%) 0%,var(--felt) 45%,var(--bg) 100%);
+  display:flex;flex-direction:column;align-items:center;gap:16px}
+.readout{text-align:center}
+.mult{font-family:var(--display);font-weight:700;font-size:clamp(36px,6.5vw,58px);line-height:1;font-variant-numeric:tabular-nums}
+.mult.idle{color:var(--muted)} .mult.win{color:var(--win)} .mult.bust{color:var(--bust)}
+.sub{margin-top:6px;color:var(--muted);font-size:14px;font-weight:500}
+.sub b{color:var(--fg);font-weight:500}
+.table{display:flex;align-items:center;justify-content:center;gap:clamp(16px,5vw,48px);width:100%}
+.slot{display:flex;flex-direction:column;align-items:center;gap:8px}
+.slot small{color:var(--muted);font-size:12px;letter-spacing:.03em}
+
+.card{width:clamp(110px,22vw,168px);aspect-ratio:5/7;max-width:100%;perspective:900px}
+.card .in{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform .38s cubic-bezier(.3,.7,.3,1)}
+.card.down .in{transform:rotateY(180deg)}
+.face,.back{position:absolute;inset:0;border-radius:12px;backface-visibility:hidden}
+.face{background:var(--card);color:var(--card-ink);box-shadow:0 10px 24px rgba(0,0,0,.35);display:grid;grid-template-rows:auto 1fr auto;padding:8% 9%}
+.face.red{color:var(--card-red)}
+.face .c1,.face .c2{font-family:var(--display);font-weight:700;line-height:.95;font-size:clamp(18px,3.6vw,28px);display:flex;flex-direction:column;align-items:flex-start}
+.face .c1 span,.face .c2 span{font-size:.8em}
+.face .c2{transform:rotate(180deg);align-self:end}
+.face .pip{display:grid;place-items:center;font-size:clamp(46px,9vw,76px);line-height:1}
+.back{transform:rotateY(180deg);box-shadow:0 10px 24px rgba(0,0,0,.35);
+  background:repeating-linear-gradient(45deg,var(--accent) 0 6px,color-mix(in srgb,var(--accent) 70%,#000) 6px 12px);border:6px solid var(--card)}
+.card.ghost-card .face,.card.ghost-card .back{opacity:.25}
+.vs{font-family:var(--display);font-weight:700;color:var(--muted);font-size:20px}
+.card.good .face{outline:4px solid var(--win);outline-offset:3px}
+.card.bad .face{outline:4px solid var(--bust);outline-offset:3px}
+.toast{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-weight:500;white-space:nowrap;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.toast.win{border-color:var(--win);color:var(--win)}
+.toast.bust{border-color:var(--bust);color:var(--bust)}
+.shake{animation:shake .35s}
+@keyframes shake{20%{transform:translate(-6px,2px)}40%{transform:translate(5px,-3px)}60%{transform:translate(-4px,1px)}80%{transform:translate(3px,-1px)}}
+@media (prefers-reduced-motion:reduce){.shake{animation:none}.card .in{transition:none}}
+
+.panel{grid-area:panel;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.panel label{font-size:12px;color:var(--muted);letter-spacing:.03em}
+.field{display:flex;flex-direction:column;gap:6px}
+input[type=number]{width:100%;min-width:0;background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:10px 12px;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+input:disabled,.q:disabled{opacity:.5;cursor:not-allowed}
+.amtrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px}
+.q{background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:0 10px;font-family:var(--display);font-size:14px;cursor:pointer}
+.q:hover:not(:disabled){border-color:var(--muted)}
+.guess{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.gbtn{display:flex;flex-direction:column;align-items:center;gap:2px;background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:12px 6px;cursor:pointer;font:inherit}
+.gbtn:hover:not(:disabled){border-color:var(--accent)}
+.gbtn:disabled{opacity:.45;cursor:not-allowed}
+.gbtn .t{font-weight:700;font-size:15px}
+.gbtn .t i{font-style:normal;color:var(--accent);margin-right:4px}
+.gbtn .p{font-family:var(--display);font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.gbtn .p b{color:var(--accent);font-weight:500}
+.main{border:0;border-radius:10px;padding:16px 12px;font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.02em;cursor:pointer;background:var(--accent);color:var(--accent-ink);font-variant-numeric:tabular-nums}
+.main.cash{background:var(--win);color:var(--win-ink)}
+.main:disabled{background:var(--raise);color:var(--muted);cursor:default}
+.main:active:not(:disabled){transform:translateY(1px)}
+.second{background:transparent;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:10px;font:inherit;font-weight:500;cursor:pointer}
+.second:hover:not(:disabled){border-color:var(--muted)}
+.second:disabled{opacity:.45;cursor:not-allowed}
+.hint{margin:-4px 0 0;color:var(--muted);font-size:12px;text-align:center}
+.hint kbd{font-family:var(--display);font-size:11px;border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.rescue{background:transparent;border:1px dashed var(--accent);color:var(--accent);border-radius:10px;padding:10px;font:inherit;font-weight:500;cursor:pointer;text-align:center;text-decoration:none}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stats{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.stats div{display:flex;flex-direction:column;gap:2px}
+.stats dt{font-size:11px;color:var(--muted)}
+.stats dd{margin:0;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+
+h2{margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+h2 small{font-weight:400;margin-left:6px}
+.trail{grid-area:trail;min-width:0}
+.trailwrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
+.cards{display:flex;align-items:center;gap:6px;width:max-content;min-height:62px}
+.mini{width:40px;height:56px;border-radius:6px;background:var(--card);color:var(--card-ink);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:15px;line-height:1}
+.mini.red{color:var(--card-red)}
+.mini.lost{outline:2px solid var(--bust);outline-offset:2px}
+.arrow{display:flex;flex-direction:column;align-items:center;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:34px}
+.arrow b{font-size:14px;color:var(--win)}
+.arrow.bad b{color:var(--bust)}
+.arrow.skip b{color:var(--muted)}
+.hist{grid-area:hist;min-width:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;font-variant-numeric:tabular-nums;padding:3px 10px;border-radius:999px;background:var(--raise);border:1px solid var(--line);color:var(--muted)}
+.chip b{font-family:var(--display);font-weight:500;margin-left:4px}
+.chip.win b{color:var(--win)} .chip.lose b{color:var(--bust)}
+.none{color:var(--muted);font-size:13px}
+.rules{grid-area:rules;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.rules ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.rules p{margin:10px 0 0;color:var(--muted);font-size:12px}
+.w{color:var(--win)} .l{color:var(--bust)}
+</style>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <a class="back" href="/">‹ 로비</a>
+    <div class="brand">HILO<span>배팅 할래 말래</span></div>
+    <div class="topright">
+      <button id="snd" class="ghost" type="button">소리 켜짐</button>
+      <div class="wallet"><span class="lbl">보유</span><b id="bal">10,000</b><span>P</span></div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="stage" id="stage">
+      <div class="readout">
+        <div id="mult" class="mult idle">1.00×</div>
+        <div id="sub" class="sub">금액을 정하고 시작하면 첫 카드가 나와요</div>
+      </div>
+      <div class="table">
+        <div class="slot">
+          <div class="card" id="cur"><div class="in"><div class="face" id="curFace"></div><div class="back"></div></div></div>
+          <small>지금 카드</small>
+        </div>
+        <div class="vs">→</div>
+        <div class="slot">
+          <div class="card down" id="nxt"><div class="in"><div class="face" id="nxtFace"></div><div class="back"></div></div></div>
+          <small>다음 카드</small>
+        </div>
+      </div>
+      <div class="toast" id="toast" hidden></div>
+    </section>
+
+    <aside class="panel">
+      <div class="field">
+        <label for="amt">베팅 금액 (P)</label>
+        <div class="amtrow">
+          <input id="amt" type="number" min="10" step="10" value="500" inputmode="numeric">
+          <button class="q amtq" type="button" data-q="half">½</button>
+          <button class="q amtq" type="button" data-q="double">×2</button>
+          <button class="q amtq" type="button" data-q="max">최대</button>
+        </div>
+      </div>
+      <div class="guess">
+        <button class="gbtn" id="gHi" type="button" disabled><span class="t" id="gHiT"><i>▲</i>높거나 같음</span><span class="p" id="gHiP">—</span></button>
+        <button class="gbtn" id="gLo" type="button" disabled><span class="t" id="gLoT"><i>▼</i>낮거나 같음</span><span class="p" id="gLoP">—</span></button>
+      </div>
+      <button id="skip" class="second" type="button" disabled>이 카드 건너뛰기</button>
+      <button id="main" class="main" type="button">게임 시작</button>
+      <p class="hint"><kbd>↑</kbd> 높게 · <kbd>↓</kbd> 낮게 · <kbd>S</kbd> 건너뛰기 · <kbd>Space</kbd> 시작/캐시아웃</p>
+      <a id="rescue" class="rescue" href="/" hidden>포인트가 바닥났어요 · 로비에서 구제금 받기</a>
+      <dl class="stats">
+        <div><dt>참여한 판</dt><dd id="stRounds">0</dd></div>
+        <div><dt>총 수익</dt><dd id="stProfit">0</dd></div>
+        <div><dt>최고 배율</dt><dd id="stBest">—</dd></div>
+      </dl>
+    </aside>
+
+    <section class="trail">
+      <h2>이번 판 카드<small>화살표 아래 숫자는 그 선택으로 곱해진 배율</small></h2>
+      <div class="trailwrap" id="trailwrap"><div class="cards" id="cards"></div></div>
+    </section>
+
+    <section class="hist">
+      <h2>최근 게임</h2>
+      <div class="chips" id="hist"></div>
+    </section>
+
+    <section class="rules">
+      <h2>규칙</h2>
+      <ol>
+        <li>금액을 걸고 시작하면 카드가 한 장 나와요. A가 가장 낮고 K가 가장 높아요.</li>
+        <li>다음 카드가 지금보다 높거나 같을지, 낮거나 같을지 골라요.</li>
+        <li>맞히면 그 선택의 배율이 곱해지고, 틀리면 건 포인트를 잃어요.</li>
+        <li>A에서는 '높음'과 '같음', K에서는 '낮음'과 '같음' 중에서 골라요.</li>
+        <li>한 번이라도 맞혔으면 언제든 캐시아웃할 수 있고, 마음에 안 드는 카드는 공짜로 건너뛸 수 있어요.</li>
+      </ol>
+      <p>카드는 매번 13가지 숫자 중 하나가 똑같은 확률로 나와요(덱이 줄지 않아요). 선택마다 배율은 0.99 ÷ 맞힐 확률이라 기대 환급률은 99%예요. 실제 돈은 쓰지 않아요.</p>
+      <p>결과는 서버가 정해요 · 시드 확인은 로비의 공정성 페이지</p>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/riffwave.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/sfxr.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.floor(n).toLocaleString('ko-KR');
+  const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
+  const fmtMult = m => (m >= 1000 ? fmt(m) : (Math.floor(m * 100) / 100).toFixed(2)) + '×';
+  const EDGE = 0.99;
+  const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  const SUITS = ['♠', '♥', '♦', '♣'];   // 서버 suit 0~3 순서
+  const isRed = s => s === '♥' || s === '♦';
+  const toCard = c => ({ r: c.rank, s: SUITS[c.suit] || SUITS[0] });
+  const payOf = (bet, m100) => Math.floor(bet * m100 / 100);
+
+  // 선택지별 맞힐 칸 수 (13칸 중) — 서버 hiloOdds와 같은 규칙. 표시용
+  function oddsOf(r, guess) {
+    if (r === 1) return guess === 'hi' ? 12 : guess === 'same' ? 1 : 0;
+    if (r === 13) return guess === 'lo' ? 12 : guess === 'same' ? 1 : 0;
+    if (guess === 'hi') return 14 - r;
+    if (guess === 'lo') return r;
+    return 0;
+  }
+  const iconOf = g => g === 'same' ? '=' : g === 'hi' ? '▲' : '▼';
+  const stepMult = (r, g) => { const c = oddsOf(r, g); return c ? EDGE * 13 / c : 0; };
+
+  // 지금 카드 r(1~13) 기준 두 버튼: { guess(서버로 보낼 값), 이름, 화살표, 맞힐 확률, 배율 }
+  function options(r) {
+    const hi = r === 1
+      ? { guess: 'hi', name: '높음' }
+      : r === 13
+        ? { guess: 'same', name: '같음' }
+        : { guess: 'hi', name: '높거나 같음' };
+    const lo = r === 13
+      ? { guess: 'lo', name: '낮음' }
+      : r === 1
+        ? { guess: 'same', name: '같음' }
+        : { guess: 'lo', name: '낮거나 같음' };
+    for (const o of [hi, lo]) { o.icon = iconOf(o.guess); o.p = oddsOf(r, o.guess) / 13; o.m = stepMult(r, o.guess); }
+    return { hi, lo };
+  }
+
+  // ---------- 서버 ----------
+  async function api(path, body) {
+    let res;
+    try {
+      res = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store' });
+    } catch (e) { throw new Error('서버에 연결하지 못했어요'); }
+    if (res.status === 401) { location.href = '/login'; throw new Error('로그인이 필요해요'); }
+    let j = null; try { j = await res.json(); } catch (e) {}
+    if (!res.ok || !j || !j.ok) throw new Error((j && j.error) || '요청을 처리하지 못했어요');
+    return j.data;
+  }
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+  let bal = null, stats, history;
+  let phase = 'idle';      // idle | play | flip | over   (flip = 서버 응답 기다리는 중 / 카드 뒤집는 중)
+  let game = null;         // { bet, mult100, card, trail:[{card} | {dir, icon, m, ok}], wins, lost, payout }
+  function save() { store.set('hilo.stats', stats); store.set('hilo.hist', history); }
+
+  // 서버 state.history + current → 이번 판 카드 기록
+  function trailFrom(st, lost) {
+    const out = [];
+    for (const h of st.history || []) {
+      out.push({ card: toCard(h.card) });
+      if (h.guess === 'skip') out.push({ dir: 'skip' });
+      else out.push({ dir: h.guess, icon: iconOf(h.guess), m: stepMult(h.card.rank, h.guess), ok: !!h.hit });
+    }
+    out.push({ card: toCard(st.current), lost: !!lost });
+    return out;
+  }
+
+  // ---------- 소리 ----------
+  let actx = null, soundOn = true;
+  function unlockAudio() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (actx && actx.state === 'suspended') actx.resume();
+  }
+  function tone(f, d, type = 'sine', vol = .12, delay = 0, f2) {
+    if (!actx || !soundOn) return;
+    const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + d + .02);
+  }
+  $('snd').addEventListener('click', () => { unlockAudio(); soundOn = !soundOn; $('snd').textContent = soundOn ? '소리 켜짐' : '소리 꺼짐'; });
+
+  // ---------- jsfxr 효과음 · canvas-confetti 폭죽 (CDN을 못 불러오면 위의 tone()으로 대신함) ----------
+  const SFX = (() => {
+    const lib = window.jsfxr && window.jsfxr.sfxr, defs = {}, bufs = {};
+    const make = (name, algo, tweak) => {
+      if (!lib) return;
+      try { const p = lib.generate(algo); if (tweak) tweak(p); defs[name] = p; } catch (e) {}
+    };
+    make('bet', 'blipSelect');
+    make('coin', 'pickupCoin');
+    make('big', 'powerUp');
+    make('boom', 'explosion');
+    make('tick', 'blipSelect', p => { p.p_env_sustain = 0.02; p.p_env_decay = 0.05; });
+    return {
+      play(name, vol = 1, rate = 1) {
+        if (!lib || !actx || !soundOn || !defs[name]) return false;
+        try {
+          if (!bufs[name]) bufs[name] = lib.toWebAudio(defs[name], actx).buffer;
+          const src = actx.createBufferSource(), g = actx.createGain();
+          src.buffer = bufs[name]; src.playbackRate.value = rate; g.gain.value = vol;
+          src.connect(g).connect(actx.destination); src.start();
+          return true;
+        } catch (e) { return false; }
+      }
+    };
+  })();
+  const CONFETTI_COLORS = ['#ffb23f', '#3fd49b', '#ff5a5f', '#e9edf7', '#ffe3a3'];
+  function burst(level, el) {
+    if (level < 0 || !window.confetti || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = (el || document.body).getBoundingClientRect();
+    const origin = { x: (r.left + r.width / 2) / innerWidth, y: Math.max(0.1, Math.min(0.9, (r.top + r.height * 0.55) / innerHeight)) };
+    const colors = CONFETTI_COLORS;
+    confetti({ particleCount: 30 + level * 50, spread: 55 + level * 25, startVelocity: 30 + level * 12, origin, colors, disableForReducedMotion: true });
+    if (level >= 2) {
+      confetti({ particleCount: 80, angle: 60, spread: 60, origin: { x: 0, y: 0.8 }, colors, disableForReducedMotion: true });
+      confetti({ particleCount: 80, angle: 120, spread: 60, origin: { x: 1, y: 0.8 }, colors, disableForReducedMotion: true });
+    }
+  }
+  const burstLevel = m => m >= 100 ? 2 : m >= 10 ? 1 : m >= 2 ? 0 : -1;
+
+  let toastTimer = 0;
+  function toast(msg, kind = '') {
+    const el = $('toast'); el.textContent = msg; el.className = 'toast ' + kind; el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2400);
+  }
+
+  // ---------- 카드 그리기 ----------
+  function faceHTML(c) {
+    const rk = RANKS[c.r - 1];
+    return `<div class="c1">${rk}<span>${c.s}</span></div><div class="pip">${c.s}</div><div class="c2">${rk}<span>${c.s}</span></div>`;
+  }
+  function setFace(el, c) { el.innerHTML = c ? faceHTML(c) : ''; el.className = 'face' + (c && isRed(c.s) ? ' red' : ''); }
+  const cardLabel = c => `${c.s} ${RANKS[c.r - 1]}`;
+
+  // ---------- 게임 ----------
+  async function startGame() {
+    const a = Math.floor(Number($('amt').value));
+    if (!(a >= 10)) { toast('10P 이상부터 걸 수 있어요', 'bust'); return; }
+    if (bal != null && a > bal) { toast(`보유 포인트(${fmt(bal)}P)보다 많이 걸 수 없어요`, 'bust'); return; }
+    const prev = phase;
+    phase = 'busy'; update();
+    let d;
+    try { d = await api('/api/solo/hilo/start', { bet: a, params: {} }); }
+    catch (e) { phase = prev; toast(e.message, 'bust'); update(); return; }
+    bal = d.balance;
+    const st = d.state, c = toCard(st.current);
+    game = { bet: a, mult100: st.mult100, card: c, trail: trailFrom(st, false), wins: st.correct, lost: false, payout: 0 };
+    phase = 'play';
+    SFX.play('bet', .5) || tone(520, .08, 'square', .05);
+    setFace($('curFace'), c); $('cur').className = 'card';
+    setFace($('nxtFace'), null); $('nxt').className = 'card down';
+    update();
+  }
+
+  // btn: 'hi' | 'lo' | 'skip' (버튼 위치) → 서버 guess로 바꿔서 보냄
+  async function play(btn) {
+    if (phase !== 'play') return;
+    unlockAudio();
+    const opt = btn === 'skip' ? null : options(game.card.r)[btn];
+    const guess = opt ? opt.guess : 'skip';
+    phase = 'flip';
+    update();
+    let d;
+    try { d = await api('/api/solo/hilo/step', { params: { guess } }); }
+    catch (e) { phase = 'play'; toast(e.message, 'bust'); update(); return; }
+    bal = d.balance;
+    const next = toCard(d.state.current);
+    setFace($('nxtFace'), next);
+    $('nxt').className = 'card';
+    SFX.play('tick', .4) || tone(900, .04, 'square', .03);
+    update();
+    setTimeout(() => resolve(d, guess, next), 420);
+  }
+
+  function resolve(d, guess, next) {
+    const st = d.state;
+    game.mult100 = st.mult100; game.wins = st.correct;
+    // 카드 200장을 다 쓰면 서버가 판을 끝낸다 (맞힌 게 있으면 그 배율, 없으면 베팅액 환불)
+    if (d.status === 'won') {
+      setFace($('nxtFace'), null); $('nxt').className = 'card down';
+      settleWon(d, '카드를 다 써서 판이 끝났어요 · ');
+      return;
+    }
+    if (guess === 'skip') {
+      game.trail = trailFrom(st, false);
+      advance(next); return;
+    }
+    if (d.status !== 'lost') {
+      game.trail = trailFrom(st, false);
+      $('nxt').classList.add('good');
+      SFX.play('coin', .6, 0.8 * Math.pow(2, Math.min(game.wins, 18) / 18)) || tone(440 * Math.pow(2, Math.min(game.wins, 18) / 12), .12, 'triangle', .1);
+      setTimeout(() => advance(next), 380);
+    } else {
+      game.trail = trailFrom(st, true);
+      game.lost = true; phase = 'over';
+      $('nxt').classList.add('bad');
+      stats.rounds++; stats.profit -= game.bet;
+      history.unshift({ n: game.wins, m: 0 }); history = history.slice(0, 16);
+      save();
+      SFX.play('boom', .9) || tone(240, .55, 'sawtooth', .08, 0, 45);
+      const stg = $('stage'); stg.classList.remove('shake'); void stg.offsetWidth; stg.classList.add('shake');
+      toast(`${cardLabel(next)}! 틀렸어요 · ${fmt(game.bet)}P 잃음`, 'bust');
+      update();
+    }
+  }
+
+  // 방금 뒤집은 카드를 '지금 카드'로 옮기고 다음 카드를 다시 엎어 둠
+  function advance(next) {
+    game.card = next;
+    setFace($('curFace'), next); $('cur').className = 'card';
+    $('nxt').className = 'card down';
+    setTimeout(() => setFace($('nxtFace'), null), 380);
+    phase = 'play';
+    update();
+  }
+
+  async function cashout() {
+    if (phase !== 'play' || !game || game.wins === 0) return;
+    phase = 'flip'; update();
+    let d;
+    try { d = await api('/api/solo/hilo/cashout', {}); }
+    catch (e) { phase = 'play'; toast(e.message, 'bust'); update(); return; }
+    settleWon(d, '');
+  }
+
+  function settleWon(d, note) {
+    bal = d.balance;
+    game.mult100 = d.state.mult100;
+    game.payout = typeof d.payout === 'number' ? d.payout : payOf(game.bet, game.mult100);
+    const m = game.wins > 0 ? game.mult100 / 100 : 1, win = game.payout;
+    phase = 'over';
+    stats.rounds++; stats.profit += win - game.bet; stats.best = Math.max(stats.best || 0, m);
+    history.unshift({ n: game.wins, m }); history = history.slice(0, 16);
+    save();
+    toast(`${note}${fmtMult(m)} 캐시아웃 · ${fmt(win)}P 받음`, 'win');
+    if (!SFX.play(m >= 10 ? 'big' : 'coin')) { tone(660, .12, 'triangle'); tone(880, .12, 'triangle', .12, .09); tone(1320, .22, 'triangle', .12, .18); }
+    burst(burstLevel(m), $('stage'));
+    update();
+  }
+
+  function mainAction() {
+    unlockAudio();
+    if (phase === 'idle' || phase === 'over') startGame();
+    else if (phase === 'play') cashout();
+  }
+  $('main').addEventListener('click', mainAction);
+  $('gHi').addEventListener('click', () => play('hi'));
+  $('gLo').addEventListener('click', () => play('lo'));
+  $('skip').addEventListener('click', () => play('skip'));
+  document.addEventListener('keydown', e => {
+    if (document.activeElement?.tagName === 'INPUT' && e.code !== 'Space') return;
+    if (e.code === 'Space' && document.activeElement?.tagName !== 'BUTTON') { e.preventDefault(); mainAction(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); play('hi'); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); play('lo'); }
+    else if (e.key === 's' || e.key === 'S' || e.key === 'ㄴ') play('skip');
+  });
+  document.querySelectorAll('.amtq').forEach(btn => btn.addEventListener('click', () => {
+    const inp = $('amt'), v = Math.floor(Number(inp.value) || 0), q = btn.dataset.q, b = bal || 0;
+    const nv = q === 'half' ? Math.floor(v / 2) : q === 'double' ? v * 2 : b;
+    inp.value = Math.max(10, Math.min(Math.floor(b), nv) || 10);
+    update();
+  }));
+  $('amt').addEventListener('input', update);
+
+  // ---------- 화면 갱신 ----------
+  function update() {
+    const playing = phase === 'play', live = playing || phase === 'flip';
+    $('bal').textContent = bal == null ? '—' : fmt(bal);
+    $('amt').disabled = live || phase === 'busy';
+    document.querySelectorAll('.amtq').forEach(b => { b.disabled = live || phase === 'busy'; });
+
+    // 선택 버튼 (확률·배율은 화면 표시용 계산)
+    if (game && live) {
+      const o = options(game.card.r);
+      $('gHiT').innerHTML = `<i>${o.hi.icon}</i>${o.hi.name}`;
+      $('gLoT').innerHTML = `<i>${o.lo.icon}</i>${o.lo.name}`;
+      $('gHiP').innerHTML = `${(o.hi.p * 100).toFixed(1)}% · <b>${fmtMult(o.hi.m)}</b>`;
+      $('gLoP').innerHTML = `${(o.lo.p * 100).toFixed(1)}% · <b>${fmtMult(o.lo.m)}</b>`;
+    } else {
+      $('gHiT').innerHTML = '<i>▲</i>높거나 같음'; $('gLoT').innerHTML = '<i>▼</i>낮거나 같음';
+      $('gHiP').textContent = '—'; $('gLoP').textContent = '—';
+    }
+    $('gHi').disabled = $('gLo').disabled = $('skip').disabled = !playing;
+
+    // 위쪽 배율 표시 (서버 mult100)
+    const mult = $('mult'), sub = $('sub');
+    const gm = game ? game.mult100 / 100 : 1;
+    if (phase === 'idle' || (phase === 'busy' && !game)) {
+      mult.textContent = '1.00×'; mult.className = 'mult idle';
+      sub.textContent = '금액을 정하고 시작하면 첫 카드가 나와요';
+    } else if (live) {
+      mult.textContent = fmtMult(gm); mult.className = game.wins ? 'mult' : 'mult idle';
+      sub.innerHTML = game.wins
+        ? `${game.wins}번 연속 맞힘 · 지금 빼면 <b>${fmt(payOf(game.bet, game.mult100))}P</b>`
+        : `지금 카드는 <b>${cardLabel(game.card)}</b> · 다음 카드를 맞혀 보세요`;
+    } else if (game.lost) {
+      mult.textContent = '틀림'; mult.className = 'mult bust';
+      sub.innerHTML = `${game.wins}번 맞히고 끝났어요 · <span class="l">${signed(-game.bet)}P</span>`;
+    } else {
+      mult.textContent = fmtMult(gm); mult.className = 'mult win';
+      sub.innerHTML = `${game.wins}번 맞히고 캐시아웃 · <span class="w">${signed(game.payout - game.bet)}P</span>`;
+    }
+
+    const btn = $('main'), amt = Math.floor(Number($('amt').value) || 0);
+    if (!live) { btn.textContent = `${phase === 'over' || (phase === 'busy' && game) ? '한 판 더' : '게임 시작'} · ${fmt(amt)}P`; btn.className = 'main'; btn.disabled = phase === 'busy'; }
+    else if (!game.wins) { btn.textContent = '한 번 맞히면 캐시아웃 가능'; btn.className = 'main'; btn.disabled = true; }
+    else { btn.textContent = `캐시아웃 · ${fmt(payOf(game.bet, game.mult100))}P`; btn.className = 'main cash'; btn.disabled = phase !== 'play'; }
+    $('rescue').hidden = !(bal != null && bal < 10 && !live);
+
+    $('stRounds').textContent = fmt(stats.rounds);
+    const pf = $('stProfit'); pf.textContent = signed(stats.profit); pf.className = stats.profit > 0 ? 'w' : stats.profit < 0 ? 'l' : '';
+    $('stBest').textContent = stats.best ? fmtMult(stats.best) : '—';
+
+    // 이번 판 카드 기록
+    $('cards').innerHTML = game ? game.trail.map(t => {
+      if (t.card) return `<div class="mini${isRed(t.card.s) ? ' red' : ''}${t.lost ? ' lost' : ''}"><span>${RANKS[t.card.r - 1]}</span><span>${t.card.s}</span></div>`;
+      if (t.dir === 'skip') return '<div class="arrow skip"><b>»</b>건너뜀</div>';
+      return `<div class="arrow${t.ok ? '' : ' bad'}"><b>${t.icon}</b>${fmtMult(t.m)}</div>`;
+    }).join('') : '<span class="none">게임을 시작하면 나온 카드가 여기에 쌓여요</span>';
+    const wrap = $('trailwrap'); wrap.scrollLeft = wrap.scrollWidth;
+
+    $('hist').innerHTML = history.length ? history.map(h =>
+      `<span class="chip ${h.m ? 'win' : 'lose'}">${h.n}번 맞힘<b>${h.m ? fmtMult(h.m) : '틀림'}</b></span>`).join('')
+      : '<span class="none">아직 한 판도 안 했어요</span>';
+  }
+
+  // 처음 열 때: 잔액(/api/me) + 진행 중인 판(/state)이 있으면 이어서
+  async function init() {
+    stats = store.get('hilo.stats', { rounds: 0, profit: 0, best: 0 });
+    history = store.get('hilo.hist', []);
+    // 처음 열었을 때 테이블이 비어 보이지 않게 예시 카드를 한 장 보여 줌 (결과와 무관한 장식)
+    setFace($('curFace'), { r: 7, s: '♥' });
+    phase = 'busy'; update();
+    try {
+      const me = await api('/api/me');
+      bal = me.balance;
+      const s = await api('/api/solo/hilo/state', {});
+      bal = s.balance;
+      if (s.session) {
+        const st = s.session.state, c = toCard(st.current);
+        game = { bet: s.session.stake, mult100: st.mult100, card: c, trail: trailFrom(st, false), wins: st.correct, lost: false, payout: 0 };
+        setFace($('curFace'), c); $('cur').className = 'card';
+        setFace($('nxtFace'), null); $('nxt').className = 'card down';
+        phase = 'play';
+        toast('진행 중인 판을 이어서 해요');
+      } else phase = 'idle';
+    } catch (e) { phase = 'idle'; toast(e.message, 'bust'); }
+    update();
+  }
+  init();
+})();
+</script>
+
+<script>
+  // 뒤로 가기로 돌아왔을 때 다른 게임에서 바뀐 지갑을 다시 읽음
+  addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+</script>
+</body>
+</html>

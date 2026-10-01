@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Crash · 배팅 할래 말래</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: 게임 화면(그래프)이 주인공, 오른쪽에 베팅 패널, 아래에 기록·참가자·규칙 */
+:root{
+  --bg:#0e1322; --panel:#161d31; --raise:#1f2842; --line:#2b3654;
+  --fg:#e9edf7; --muted:#8a95b2;
+  --accent:#ffb23f; --accent-ink:#241600;
+  --win:#3fd49b; --win-ink:#04210f; --bust:#ff5a5f;
+  --display:"Oswald","IBM Plex Sans KR",system-ui,sans-serif;
+  --body:"IBM Plex Sans KR",system-ui,-apple-system,"Malgun Gothic",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.5}
+.app{max-width:1120px;margin:0 auto;padding-inline:16px;padding-block:16px 48px;display:flex;flex-direction:column;gap:16px}
+
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.12em}
+.brand span{font-family:var(--body);font-weight:500;font-size:12px;letter-spacing:.04em;color:var(--muted);margin-left:8px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;vertical-align:middle}
+.topright{display:flex;align-items:center;gap:10px}
+.wallet{display:flex;align-items:baseline;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 14px}
+.wallet .lbl{color:var(--muted);font-size:12px}
+.wallet b{font-family:var(--display);font-size:20px;font-variant-numeric:tabular-nums;color:var(--accent)}
+.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+.ghost:hover{color:var(--fg)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"stage panel" "hist panel" "players rules";gap:16px;align-items:start}
+@media (max-width:820px){.grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"stage" "panel" "hist" "players" "rules"}}
+
+.stage{grid-area:stage;position:relative;aspect-ratio:16/10;max-width:100%;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  background:radial-gradient(120% 90% at 0% 100%,#1b2440 0%,var(--bg) 70%)}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hud{position:absolute;left:0;right:0;top:16%;text-align:center;pointer-events:none}
+.mult{font-family:var(--display);font-weight:700;font-size:clamp(44px,9vw,92px);line-height:1;font-variant-numeric:tabular-nums;color:var(--fg);transition:color .15s}
+.mult.idle{color:var(--muted)}
+.mult.bust{color:var(--bust)}
+.sub{margin-top:8px;color:var(--muted);font-size:14px;font-weight:500}
+.sub.bust{color:var(--bust)}
+.bar{position:absolute;left:0;bottom:0;height:3px;background:var(--accent);width:0}
+.toast{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-weight:500;white-space:nowrap;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis}
+.toast.win{border-color:var(--win);color:var(--win)}
+.toast.bust{border-color:var(--bust);color:var(--bust)}
+.shake{animation:shake .35s}
+@keyframes shake{20%{transform:translate(-6px,2px)}40%{transform:translate(5px,-3px)}60%{transform:translate(-4px,1px)}80%{transform:translate(3px,-1px)}}
+@media (prefers-reduced-motion:reduce){.shake{animation:none}}
+
+.panel{grid-area:panel;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.panel label{font-size:12px;color:var(--muted);letter-spacing:.03em}
+.panel label small{margin-left:4px;opacity:.8}
+.field{display:flex;flex-direction:column;gap:6px}
+input{width:100%;min-width:0;background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:10px 12px;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+input::placeholder{color:var(--muted);font-family:var(--body);font-size:14px}
+.amtrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px}
+.q{background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:0 10px;font-family:var(--display);font-size:14px;cursor:pointer}
+.q:hover{border-color:var(--muted)}
+.main{margin-top:6px;border:0;border-radius:10px;padding:16px 12px;font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.02em;cursor:pointer;background:var(--accent);color:var(--accent-ink);font-variant-numeric:tabular-nums}
+.main.cash{background:var(--win);color:var(--win-ink)}
+.main.cancel{background:var(--raise);color:var(--fg);border:1px solid var(--line)}
+.main:active{transform:translateY(1px)}
+.hint{margin:0;color:var(--muted);font-size:12px;text-align:center}
+.rescue{background:transparent;border:1px dashed var(--accent);color:var(--accent);border-radius:10px;padding:10px;font:inherit;font-weight:500;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stats{margin:6px 0 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.stats div{display:flex;flex-direction:column;gap:2px}
+.stats dt{font-size:11px;color:var(--muted)}
+.stats dd{margin:0;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+
+h2{margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+h2 small{font-weight:400;margin-left:6px}
+.hist{grid-area:hist}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:var(--display);font-weight:500;font-size:13px;font-variant-numeric:tabular-nums;padding:3px 10px;border-radius:999px;background:var(--raise);color:var(--muted);border:1px solid var(--line)}
+.chip.mid{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.chip.high{color:var(--win);border-color:color-mix(in srgb,var(--win) 40%,var(--line))}
+
+.players{grid-area:players;min-width:0}
+.tablewrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:8px 12px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--muted);font-weight:500;font-size:12px;border-bottom:1px solid var(--line)}
+tr+tr td{border-top:1px solid color-mix(in srgb,var(--line) 60%,transparent)}
+tr.me td{background:color-mix(in srgb,var(--accent) 8%,transparent)}
+tr.me td:first-child{color:var(--accent);font-weight:700}
+.w{color:var(--win)} .l{color:var(--bust)} .m{color:var(--muted)}
+.empty td{color:var(--muted);text-align:center!important;padding:18px}
+
+.rules{grid-area:rules;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.rules ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.rules p{margin:10px 0 0;color:var(--muted);font-size:12px}
+.rules .fair code{word-break:break-all}
+</style>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <a class="back" href="/">‹ 로비</a>
+    <div class="brand">CRASH<span>배팅 할래 말래</span></div>
+    <div class="topright">
+      <button id="snd" class="ghost" type="button">소리 켜짐</button>
+      <div class="wallet"><span class="lbl">보유</span><b id="bal">—</b><span>P</span></div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="stage" id="stage">
+      <canvas id="cv"></canvas>
+      <div class="hud">
+        <div id="mult" class="mult idle">1.00×</div>
+        <div id="sub" class="sub">서버에 연결하는 중…</div>
+      </div>
+      <div class="bar" id="bar"></div>
+      <div class="toast" id="toast" hidden></div>
+    </section>
+
+    <aside class="panel">
+      <div class="field">
+        <label for="amt">베팅 금액 (P)</label>
+        <div class="amtrow">
+          <input id="amt" type="number" min="10" step="10" value="500" inputmode="numeric">
+          <button class="q" type="button" data-q="half">½</button>
+          <button class="q" type="button" data-q="double">×2</button>
+          <button class="q" type="button" data-q="max">최대</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="auto">자동 캐시아웃 배율<small>비워두면 꺼짐</small></label>
+        <input id="auto" type="number" min="1.01" step="0.01" placeholder="예: 2.00" inputmode="decimal">
+      </div>
+      <button id="main" class="main" type="button">베팅하기</button>
+      <p class="hint">스페이스바로도 누를 수 있어요</p>
+      <a id="rescue" class="rescue" href="/" style="text-align:center;text-decoration:none" hidden>포인트가 바닥났어요 · 로비에서 구제금 받기</a>
+      <dl class="stats">
+        <div><dt>참여한 판</dt><dd id="stRounds">0</dd></div>
+        <div><dt>총 수익</dt><dd id="stProfit">0</dd></div>
+        <div><dt>최고 배율</dt><dd id="stBest">—</dd></div>
+      </dl>
+    </aside>
+
+    <section class="hist">
+      <h2>최근 터진 배율</h2>
+      <div class="chips" id="hist"></div>
+    </section>
+
+    <section class="players">
+      <h2>이번 판 참가자<small>모두가 같은 판에 참여해요</small></h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>이름</th><th>베팅</th><th>캐시아웃</th><th>수익</th></tr></thead>
+          <tbody id="plist"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="rules">
+      <h2>규칙</h2>
+      <ol>
+        <li>판마다 5초 동안 베팅할 수 있어요.</li>
+        <li>판이 시작되면 배율이 1.00×부터 올라가요.</li>
+        <li>터지기 전에 캐시아웃하면 베팅 금액 × 그 순간 배율을 받아요.</li>
+        <li>터질 때까지 못 빼면 건 포인트를 잃어요.</li>
+        <li>자동 캐시아웃을 걸면 그 배율에 닿는 순간 알아서 빠져요.</li>
+      </ol>
+      <p>터지는 배율이 x 이상일 확률은 0.99 ÷ x예요. 2× 이상은 49.5%, 10× 이상은 9.9%이고, 약 1%는 1.00×에서 바로 터져요. 기대 환급률은 99%예요. 실제 돈은 쓰지 않아요.</p>
+      <p class="fair">결과는 서버가 정하고, 판마다 커밋(해시)을 먼저 공개해요<span id="fair"></span></p>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/riffwave.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/sfxr.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.floor(n).toLocaleString('ko-KR');
+  const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const K = 0.00015;            // 배율 = e^(K·ms) → 2×는 약 4.6초, 10×는 약 15초 (서버와 같은 식)
+  const BET_MS = 5000;          // 서버 CRASH_BETTING_MS
+  const AUTO_MARGIN_MS = 200;   // 자동 캐시아웃은 시계 오차를 감안해 조금 늦게 요청 (못 보내도 서버가 터질 때 정산)
+  const mAt = t => Math.exp(K * t);
+  const tAt = m => Math.log(m) / K;
+  const m100At = ms => ms <= 0 ? 100 : Math.floor(100 * Math.exp(K * ms));
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+
+  // 잔액·라운드·참가자·기록은 모두 서버 값. 화면에 저장하는 건 내 통계뿐.
+  let bal = 0, myName = null, stats = store.get('crash.stats', { rounds: 0, profit: 0, best: 0 });
+  let round = null, bets = [], history = [];
+  let offset = 0;               // 서버 시각 − 내 시각
+  let phase = 'bet', crashPoint = 1, curM = 1, tNow = 0, betLeft = BET_MS;
+  let me = null, pending = null, busy = false;
+  let ready = false, initial = true;
+  let autoSent = null, bustSeen = null, cashSeen = null;
+
+  function save() { store.set('crash.stats', stats); }
+
+  // ---------- 소리 ----------
+  let actx = null, soundOn = true;
+  function unlockAudio() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (actx && actx.state === 'suspended') actx.resume();
+  }
+  function tone(f, d, type = 'sine', vol = .12, delay = 0, f2) {
+    if (!actx || !soundOn) return;
+    const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + d + .02);
+  }
+  $('snd').addEventListener('click', () => {
+    unlockAudio(); soundOn = !soundOn;
+    $('snd').textContent = soundOn ? '소리 켜짐' : '소리 꺼짐';
+  });
+
+  // ---------- 알림 ----------
+  // ---------- jsfxr 효과음 · canvas-confetti 폭죽 (CDN을 못 불러오면 위의 tone()으로 대신함) ----------
+  const SFX = (() => {
+    const lib = window.jsfxr && window.jsfxr.sfxr, defs = {}, bufs = {};
+    const make = (name, algo, tweak) => {
+      if (!lib) return;
+      try { const p = lib.generate(algo); if (tweak) tweak(p); defs[name] = p; } catch (e) {}
+    };
+    make('bet', 'blipSelect');
+    make('coin', 'pickupCoin');
+    make('big', 'powerUp');
+    make('boom', 'explosion');
+    make('hit', 'hitHurt');
+    make('tick', 'blipSelect', p => { p.p_env_sustain = 0.02; p.p_env_decay = 0.05; });
+    return {
+      play(name, vol = 1, rate = 1) {
+        if (!lib || !actx || !soundOn || !defs[name]) return false;
+        try {
+          if (!bufs[name]) bufs[name] = lib.toWebAudio(defs[name], actx).buffer;
+          const src = actx.createBufferSource(), g = actx.createGain();
+          src.buffer = bufs[name]; src.playbackRate.value = rate; g.gain.value = vol;
+          src.connect(g).connect(actx.destination); src.start();
+          return true;
+        } catch (e) { return false; }
+      }
+    };
+  })();
+  const CONFETTI_COLORS = ['#ffb23f', '#3fd49b', '#ff5a5f', '#e9edf7', '#ffe3a3'];
+  // level 0: 작은 폭죽, 1: 큰 폭죽, 2: 양옆에서 한 번 더
+  function burst(level, el) {
+    if (level < 0 || !window.confetti || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = (el || document.body).getBoundingClientRect();
+    const origin = { x: (r.left + r.width / 2) / innerWidth, y: Math.max(0.1, Math.min(0.9, (r.top + r.height * 0.55) / innerHeight)) };
+    const colors = CONFETTI_COLORS;
+    confetti({ particleCount: 30 + level * 50, spread: 55 + level * 25, startVelocity: 30 + level * 12, origin, colors, disableForReducedMotion: true });
+    if (level >= 2) {
+      confetti({ particleCount: 80, angle: 60, spread: 60, origin: { x: 0, y: 0.8 }, colors, disableForReducedMotion: true });
+      confetti({ particleCount: 80, angle: 120, spread: 60, origin: { x: 1, y: 0.8 }, colors, disableForReducedMotion: true });
+    }
+  }
+  const burstLevel = m => m >= 100 ? 2 : m >= 10 ? 1 : m >= 2 ? 0 : -1;
+
+  let toastTimer = 0;
+  function toast(msg, kind = '') {
+    const el = $('toast'); el.textContent = msg; el.className = 'toast ' + kind; el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
+  }
+
+  // ---------- 서버 ----------
+  let seq = 0, lastSeq = 0;
+  async function api(path, body) {
+    const id = ++seq;
+    const opt = body === undefined ? { credentials: 'same-origin' }
+      : { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
+    const res = await fetch(path, opt);
+    if (res.status === 401) { location.href = '/login'; throw new Error('로그인이 필요해요'); }
+    let j = null;
+    try { j = await res.json(); } catch (e) {}
+    if (!res.ok || !j || j.error) throw new Error((j && j.error) || '서버와 연결이 불안정해요');
+    return { id, data: j.data };
+  }
+
+  // 서버 응답을 화면 상태로 옮김. 늦게 도착한 옛 응답은 버림.
+  function applyView(d, id) {
+    if (id < lastSeq) return;
+    lastSeq = id;
+    offset = Date.parse(d.serverNow) - Date.now();
+    round = d.round; bets = d.bets || []; bal = d.balance;
+    history = (d.history || []).map(h => h.crashPoint100 / 100);
+    const mine = myName == null ? null : bets.find(b => b.username === myName);
+    me = mine ? {
+      amount: mine.stake,
+      auto: mine.auto100 != null ? mine.auto100 / 100 : null,
+      cashed: mine.cashout100 != null ? mine.cashout100 / 100 : null,
+      payout: mine.payout
+    } : null;
+    if (round.phase === 'crashed') crashPoint = round.crashPoint100 / 100;
+    ready = true;
+
+    // 내 정산 결과로 통계 갱신 (판마다 한 번)
+    if (me && me.payout != null && stats.lastRound !== round.id) {
+      stats.rounds++; stats.profit += me.payout - me.amount;
+      if (me.cashed) stats.best = Math.max(stats.best || 0, me.cashed);
+      stats.lastRound = round.id; save();
+    }
+    // 캐시아웃 연출 (판마다 한 번, 처음 불러올 때는 생략)
+    if (me && me.cashed && cashSeen !== round.id) {
+      cashSeen = round.id;
+      if (!initial) {
+        toast(`${me.cashed.toFixed(2)}×에 캐시아웃 · ${fmt(me.payout)}P 받음`, 'win');
+        if (!SFX.play(me.cashed >= 10 ? 'big' : 'coin')) { tone(660, .12, 'triangle'); tone(990, .2, 'triangle', .12, .1); }
+        burst(burstLevel(me.cashed), $('stage'));
+      }
+    }
+    // 터짐 연출 (판마다 한 번)
+    if (round.phase === 'crashed' && bustSeen !== round.id) {
+      bustSeen = round.id;
+      if (!initial) {
+        if (me && !me.cashed) toast(`${crashPoint.toFixed(2)}×에서 터졌어요 · ${fmt(me.amount)}P 잃음`, 'bust');
+        SFX.play('boom', .9) || tone(240, .55, 'sawtooth', .07, 0, 50);
+        const st = $('stage'); st.classList.remove('shake'); void st.offsetWidth; st.classList.add('shake');
+      }
+    }
+    initial = false;
+    tick();
+    // 예약한 베팅은 다음 베팅 시간이 열리면 보냄
+    if (pending && phase === 'bet' && !me && !busy) {
+      const b = pending; pending = null;
+      if (b.amount <= bal) placeBet(b);
+      else toast('포인트가 모자라서 예약한 베팅을 취소했어요', 'bust');
+    }
+    updateUI(true);
+  }
+
+  async function loadMe() {
+    try {
+      const r = await api('/api/me');
+      myName = r.data.username;
+      if (!ready) { bal = r.data.balance; updateUI(true); }
+    } catch (e) { toast(e.message, 'bust'); }
+  }
+
+  let pollFailed = false;
+  async function poll() {
+    if (myName == null) await loadMe();
+    try {
+      const r = await api('/api/crash/state', {});
+      pollFailed = false;
+      applyView(r.data, r.id);
+    } catch (e) {
+      if (!pollFailed) toast(e.message, 'bust');
+      pollFailed = true;
+    }
+    setTimeout(poll, phase === 'run' ? 250 : 1000);
+  }
+
+  // ---------- 게임 흐름 ----------
+  async function placeBet(b) {
+    busy = true;
+    try {
+      const r = await api('/api/crash/bet', { stake: b.amount, auto100: b.auto100 });
+      applyView(r.data, r.id);
+      SFX.play('bet', .5) || tone(520, .08, 'square', .05);
+    } catch (e) { toast(e.message, 'bust'); }
+    busy = false; updateUI(true);
+  }
+  async function cashout() {
+    if (!me || me.cashed || busy) return;
+    busy = true;
+    try { const r = await api('/api/crash/cashout', {}); applyView(r.data, r.id); }
+    catch (e) { toast(e.message, 'bust'); }
+    busy = false; updateUI(true);
+  }
+
+  function readBet() {
+    const a = Math.floor(Number($('amt').value));
+    if (!(a >= 10)) { toast('10P 이상부터 걸 수 있어요', 'bust'); return null; }
+    if (a > bal) { toast(`보유 포인트(${fmt(bal)}P)보다 많이 걸 수 없어요`, 'bust'); return null; }
+    const av = $('auto').value.trim();
+    let auto100 = null;
+    if (av) {
+      auto100 = Math.round(Number(av) * 100);
+      if (!(auto100 >= 101)) { toast('자동 캐시아웃은 1.01× 이상으로 정해 주세요', 'bust'); return null; }
+    }
+    return { amount: a, auto100 };
+  }
+
+  function mainAction() {
+    unlockAudio();
+    if (!ready || busy) return;
+    if (phase === 'bet') {
+      if (me) toast('이번 판에는 이미 걸었어요');
+      else { const b = readBet(); if (b) placeBet(b); }
+    } else if (phase === 'run' && me && !me.cashed) {
+      cashout();
+    } else {
+      if (pending) { pending = null; toast('다음 판 예약을 취소했어요'); }
+      else { const b = readBet(); if (b) { pending = b; toast(`다음 판에 ${fmt(b.amount)}P를 걸어둘게요`); } }
+    }
+    updateUI(true);
+  }
+  $('main').addEventListener('click', mainAction);
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && document.activeElement?.tagName !== 'BUTTON') { e.preventDefault(); mainAction(); }
+  });
+
+  document.querySelectorAll('.q').forEach(btn => btn.addEventListener('click', () => {
+    const inp = $('amt'), v = Math.floor(Number(inp.value) || 0);
+    const q = btn.dataset.q;
+    const nv = q === 'half' ? Math.floor(v / 2) : q === 'double' ? v * 2 : bal;
+    inp.value = Math.max(10, Math.min(Math.floor(bal), nv) || 10);
+    updateUI(true);
+  }));
+  $('amt').addEventListener('input', () => updateUI(true));
+
+  // 서버 시각 기준으로 지금 단계·배율 계산 (터짐은 서버가 알려줄 때만)
+  function tick() {
+    if (!round) return;
+    const ms = (Date.now() + offset) - Date.parse(round.bettingEndsAt);
+    if (round.phase === 'crashed') { phase = 'crash'; curM = crashPoint; tNow = tAt(Math.max(1, crashPoint)); }
+    else if (ms < 0) { phase = 'bet'; curM = 1; tNow = 0; betLeft = -ms; }
+    else { phase = 'run'; curM = m100At(ms) / 100; tNow = ms; }
+    if (phase === 'run' && me && !me.cashed && me.auto && autoSent !== round.id && ms >= tAt(me.auto) + AUTO_MARGIN_MS && !busy) {
+      autoSent = round.id; cashout();
+    }
+  }
+
+  // ---------- 그리기 ----------
+  const cv = $('cv'), ctx = cv.getContext('2d');
+  const css = getComputedStyle(document.documentElement);
+  const C = k => css.getPropertyValue(k).trim();
+  const col = { line: C('--line'), muted: C('--muted'), accent: C('--accent'), bust: C('--bust'), win: C('--win') };
+
+  function niceStep(range, maxTicks) {
+    const raw = range / maxTicks, p = 10 ** Math.floor(Math.log10(raw));
+    for (const m of [1, 2, 5, 10]) if (m * p >= raw) return m * p;
+    return 10 * p;
+  }
+
+  function draw() {
+    const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    const W = Math.round(r.width * d), H = Math.round(r.height * d);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    const w = r.width, h = r.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const pl = 48, pr = 18, pt = 18, pb = 28;
+    const xMax = Math.max(8000, tNow * 1.15);
+    const yMax = Math.max(2, curM * 1.15);
+    const X = t => pl + t / xMax * (w - pl - pr);
+    const Y = m => h - pb - (m - 1) / (yMax - 1) * (h - pb - pt);
+
+    ctx.font = '500 11px "Oswald", system-ui, sans-serif';
+    ctx.lineWidth = 1;
+    // 가로 눈금 (배율)
+    const ys = niceStep(yMax - 1, 4);
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let v = 1; v <= yMax + 1e-9; v += ys) {
+      const y = Math.round(Y(v)) + .5;
+      ctx.strokeStyle = col.line; ctx.globalAlpha = .6;
+      ctx.beginPath(); ctx.moveTo(pl, y); ctx.lineTo(w - pr, y); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = col.muted;
+      ctx.fillText((ys < 1 ? v.toFixed(1) : String(Math.round(v))) + '×', pl - 8, y);
+    }
+    // 세로 눈금 (초)
+    const xs = niceStep(xMax / 1000, 5);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let s = 0; s * 1000 <= xMax; s += xs) {
+      const x = Math.round(X(s * 1000)) + .5;
+      ctx.fillStyle = col.muted; ctx.fillText(s + '초', x, h - pb + 8);
+    }
+
+    if (phase === 'bet' || !round) return;
+
+    const stroke = phase === 'crash' ? col.bust : col.accent;
+    const N = 90;
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) {
+      const t = tNow * i / N, x = X(t), y = Y(mAt(t));
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    const ex = X(tNow), ey = Y(mAt(tNow));
+    // 곡선 아래 채우기
+    ctx.save();
+    ctx.lineTo(ex, h - pb); ctx.lineTo(X(0), h - pb); ctx.closePath();
+    const g = ctx.createLinearGradient(0, pt, 0, h - pb);
+    g.addColorStop(0, stroke + '55'); g.addColorStop(1, stroke + '00');
+    ctx.fillStyle = g; ctx.fill();
+    ctx.restore();
+    // 곡선
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) {
+      const t = tNow * i / N, x = X(t), y = Y(mAt(t));
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.strokeStyle = stroke; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.stroke();
+    // 끝점
+    ctx.beginPath(); ctx.arc(ex, ey, 6, 0, Math.PI * 2); ctx.fillStyle = stroke; ctx.fill();
+    ctx.beginPath(); ctx.arc(ex, ey, 12, 0, Math.PI * 2); ctx.fillStyle = stroke + '33'; ctx.fill();
+
+    // 내가 캐시아웃한 지점 표시
+    if (me && me.cashed) {
+      const cx = X(tAt(me.cashed)), cy = Y(me.cashed);
+      ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fillStyle = col.win; ctx.fill();
+      ctx.fillStyle = col.win; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.font = '700 12px "Oswald", system-ui, sans-serif';
+      ctx.fillText('나 ' + me.cashed.toFixed(2) + '×', Math.min(cx + 8, w - pr - 60), cy - 6);
+    }
+  }
+
+  // ---------- 화면 갱신 ----------
+  let lastUI = 0, fairText = '';
+  function updateUI(force) {
+    const now = performance.now();
+    const mult = $('mult'), sub = $('sub');
+    if (!ready) {
+      mult.textContent = '1.00×'; mult.className = 'mult idle';
+      sub.textContent = '서버에 연결하는 중…'; sub.className = 'sub';
+    } else if (phase === 'bet') {
+      mult.textContent = '1.00×'; mult.className = 'mult idle';
+      sub.textContent = `다음 판까지 ${Math.max(0, betLeft / 1000).toFixed(1)}초`; sub.className = 'sub';
+      $('bar').style.width = Math.max(0, Math.min(100, (BET_MS - betLeft) / BET_MS * 100)) + '%';
+    } else if (phase === 'run') {
+      mult.textContent = curM.toFixed(2) + '×'; mult.className = 'mult';
+      sub.textContent = me && !me.cashed ? `지금 빼면 ${fmt(me.amount * curM)}P` : '올라가는 중'; sub.className = 'sub';
+      $('bar').style.width = '0';
+    } else {
+      mult.textContent = crashPoint.toFixed(2) + '×'; mult.className = 'mult bust';
+      sub.textContent = '펑! 터졌어요'; sub.className = 'sub bust';
+      $('bar').style.width = '0';
+    }
+
+    if (!force && now - lastUI < 80) return;
+    lastUI = now;
+
+    $('bal').textContent = fmt(bal);
+    const btn = $('main'), amt = Math.floor(Number($('amt').value) || 0);
+    if (phase === 'bet' && !me) { btn.textContent = `베팅하기 · ${fmt(amt)}P`; btn.className = 'main'; }
+    else if (phase === 'bet' && me) { btn.textContent = `베팅 완료 (${fmt(me.amount)}P)`; btn.className = 'main cancel'; }
+    else if (phase === 'run' && me && !me.cashed) { btn.textContent = `캐시아웃 · ${fmt(me.amount * curM)}P`; btn.className = 'main cash'; }
+    else if (pending) { btn.textContent = `다음 판 예약 취소 (${fmt(pending.amount)}P)`; btn.className = 'main cancel'; }
+    else { btn.textContent = `다음 판에 베팅하기 · ${fmt(amt)}P`; btn.className = 'main'; }
+
+    $('rescue').hidden = !(ready && bal < 10 && !me && !pending);
+
+    $('stRounds').textContent = fmt(stats.rounds);
+    const p = $('stProfit'); p.textContent = signed(stats.profit); p.className = stats.profit > 0 ? 'w' : stats.profit < 0 ? 'l' : '';
+    $('stBest').textContent = stats.best ? stats.best.toFixed(2) + '×' : '—';
+
+    $('hist').innerHTML = history.map(v =>
+      `<span class="chip ${v >= 10 ? 'high' : v >= 2 ? 'mid' : ''}">${v.toFixed(2)}×</span>`).join('');
+
+    const rows = bets.map(b => ({
+      name: b.username, isMe: myName != null && b.username === myName, amount: b.stake,
+      cashed: b.cashout100 != null ? b.cashout100 / 100 : null, payout: b.payout
+    })).sort((a, b) => b.isMe - a.isMe);
+    $('plist').innerHTML = rows.length ? rows.map(r => {
+      let c, pr;
+      if (r.cashed) { c = `<span class="w">${r.cashed.toFixed(2)}×</span>`; pr = `<span class="w">${signed((r.payout ?? Math.floor(r.amount * r.cashed)) - r.amount)}</span>`; }
+      else if (phase === 'crash') { c = '<span class="l">터짐</span>'; pr = `<span class="l">${signed(-r.amount)}</span>`; }
+      else if (phase === 'run') { c = '<span class="m">진행 중</span>'; pr = '<span class="m">—</span>'; }
+      else { c = '<span class="m">대기</span>'; pr = '<span class="m">—</span>'; }
+      return `<tr class="${r.isMe ? 'me' : ''}"><td>${esc(r.name)}</td><td>${fmt(r.amount)}</td><td>${c}</td><td>${pr}</td></tr>`;
+    }).join('') : '<tr class="empty"><td colspan="4">아직 아무도 안 걸었어요</td></tr>';
+
+    // 공정성: 이번 판 커밋(앞 12자리), 터진 뒤에는 공개된 시드
+    const ft = round ? ` · #${round.roundNo} 커밋 <code>${esc(round.commit.slice(0, 12))}</code>` +
+      (round.seed ? ` · 공개된 시드 <code>${esc(round.seed)}</code>` : '') : '';
+    if (ft !== fairText) { fairText = ft; $('fair').innerHTML = ft; }
+  }
+
+  function frame() {
+    tick();
+    draw();
+    updateUI(false);
+    requestAnimationFrame(frame);
+  }
+
+  updateUI(true);
+  requestAnimationFrame(frame);
+  poll();
+})();
+</script>
+
+<script>
+  // 뒤로 가기로 돌아왔을 때 다른 게임에서 바뀐 지갑을 다시 읽음
+  addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+</script>
+</body>
+</html>

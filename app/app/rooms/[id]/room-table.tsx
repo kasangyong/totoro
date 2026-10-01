@@ -6,6 +6,7 @@ import type { BetActionType } from "@/lib/engine/betting";
 import type { RoomView } from "@/lib/rooms/service";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { HwatuCard } from "./hwatu-card";
+import { HandRanks } from "./hand-ranks";
 import { PlayingCard } from "./playing-card";
 
 const ACTION_LABEL: Record<BetActionType, string> = {
@@ -180,7 +181,8 @@ export function RoomTable({ roomId }: { roomId: string }) {
         <span className="w-20 text-right text-xs text-muted">{view.commit ? `커밋 ${view.commit.slice(0, 8)}…` : ""}</span>
       </header>
 
-      <section className="stage mt-4 grid gap-4 p-4 sm:p-6">
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_230px]">
+      <section className="stage grid gap-4 p-4 sm:p-6">
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted">
             {view.phase === "seeding" && `모두의 시드를 모으는 중 (${view.seedsSubmitted.length}/${view.players.length})`}
@@ -305,6 +307,8 @@ export function RoomTable({ roomId }: { roomId: string }) {
           </div>
         )}
       </section>
+      {game && mySeat && <HandRanks game={view.room.game} myCards={game.cards.filter((c) => c.ownerId === me && c.card !== null).map((c) => c.card!)} />}
+      </div>
 
       {result && (
         <section className="panel mt-4 p-4">

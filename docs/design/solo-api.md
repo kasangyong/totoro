@@ -6,7 +6,7 @@
 
 ## 공통
 - 응답: 성공 `{ ok: true, data }`, 실패 `{ error: "한국어 메시지" }` + 4xx/5xx. 401이면 `/login`으로 보낸다.
-- 금액은 정수 포인트, 최소 베팅 10P. 배율은 **100배 정수** (`mult100: 250` = 2.50×). 지급 = `floor(베팅 × mult100 / 100)`.
+- 금액은 정수 포인트, 베팅 10P ~ 1,000,000P, 배율 상한 10,000,000×. 배율은 **100배 정수** (`mult100: 250` = 2.50×). 지급 = `floor(베팅 × mult100 / 100)`.
 - `GET /api/me` → `{ username, balance }`
 
 ## 단판: `POST /api/solo/{game}/play` `{ bet, params }`
@@ -14,7 +14,7 @@
 
 | game | params | result |
 |---|---|---|
-| dice | `{ mode: "under"\|"over", target: 2~98 정수 }` | `{ roll: 0~10000 (100배, 50.00 = 5000), win, mult100, payout }` |
+| dice | `{ mode: "under"\|"over", target: 2~98 정수 }` | `{ roll: 0~10000 (100배, 50.00 = 5000), win, mult100, payout }` — 지급은 `floor(베팅 × 99 / 확률%)` (표시 배율과 1P 안팎 차이 가능) |
 | limbo | `{ target100: 101~100000000 }` | `{ result100, win, mult100, payout }` |
 | wheel | `{ risk: "low"\|"med"\|"high", segments: 10\|20\|30 }` | `{ index (칸 번호), win, mult100, payout }` |
 | plinko | `{ rows: 8\|12\|16, risk: "low"\|"med"\|"high" }` | `{ path: [0\|1…] (줄마다 0=왼쪽 1=오른쪽), slot, win, mult100, payout }` |
@@ -31,6 +31,7 @@ Wheel·Plinko 배율표는 `app/lib/engine/solo/games.ts`의 `WHEEL`·`PLINKO` (
 | hilo | `{}` | `{ guess: "hi"\|"lo"\|"same"\|"skip" }` | `{ current: { rank 1~13, suit 0~3 }, index, correct, mult100, history: [{ card, guess, hit }] }` — hi = 높거나 같음, lo = 낮거나 같음, A는 hi(더 높음)/same, K는 lo(더 낮음)/same |
 
 - `cashout`은 한 번 이상 성공해야 가능 (`mines` 1칸, `chicken` 1칸, `hilo` 1번 적중).
+- HiLo는 카드 200장을 다 쓰면 판이 끝난다: 맞힌 게 있으면 그 배율로, 없으면 베팅액 그대로 돌려줌.
 - 게임마다 진행 중인 판은 1개. 새로고침하면 `state`로 이어서 한다.
 
 ## Crash: `POST /api/crash/{state|bet|cashout}`
@@ -41,3 +42,7 @@ Wheel·Plinko 배율표는 `app/lib/engine/solo/games.ts`의 `WHEEL`·`PLINKO` (
 
 ## 공정성: `GET /api/fair`, `POST /api/fair { clientSeed? }`
 지금 시드 쌍(서버 시드는 해시만), 공개된 지난 시드, 최근 판. POST는 지금 서버 시드를 공개하고 교체 (진행 중인 판이 있으면 거부).
+
+## 알려진 한계
+- **Crash 시드:** 라운드마다 서버가 시드를 만들어 해시를 먼저 공개한다. 커밋 이후에는 바꿀 수 없고 공개 후 누구나 재계산할 수 있지만, 운영자가 **커밋 전에** 시드를 골라 쓰는 것까지는 막지 못한다. 더 강하게 하려면 해시 체인을 미리 커밋하는 방식으로 바꾼다 (배율 파생 라벨 `crash-v1`을 버전 키로 유지).
+- 혼자 하는 게임은 사용자 시드가 결과에 섞이므로 서버가 혼자 결과를 정할 수 없다. 단, 서버 시드는 교체할 때까지 공개되지 않는다.

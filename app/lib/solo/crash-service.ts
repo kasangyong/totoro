@@ -2,7 +2,7 @@
 // 누가 상태를 조회하든 같은 잠금(advisory lock) 안에서: 터질 시각이 지났으면 정산·공개, 3초 뒤 다음 라운드 생성.
 import { randomBytes } from "node:crypto";
 import { commitOf } from "../engine/rng";
-import { MIN_BET, payoutOf } from "../engine/solo/games";
+import { MAX_BET, MIN_BET, payoutOf } from "../engine/solo/games";
 import { CRASH_AFTER_MS, CRASH_BETTING_MS, crashMs, crashMultiplier100, crashPointFromSeed } from "../engine/solo/crash";
 import { engineDb, type Tx } from "../rooms/db";
 import { RoomError as GameError } from "../rooms/service";
@@ -138,6 +138,7 @@ export function crashState(userId: string) {
 
 export function crashBet(userId: string, stake: number, auto100: number | null) {
   if (!Number.isSafeInteger(stake) || stake < MIN_BET) throw new GameError(`${MIN_BET}P 이상부터 걸 수 있어요.`);
+  if (stake > MAX_BET) throw new GameError(`한 판에 최대 ${MAX_BET.toLocaleString("ko-KR")}P까지 걸 수 있어요.`);
   if (auto100 !== null && (!Number.isInteger(auto100) || auto100 < 101 || auto100 > 100_000_000)) {
     throw new GameError("자동 캐시아웃은 1.01× 이상이에요.");
   }

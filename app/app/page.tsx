@@ -4,13 +4,13 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { DailyClaims } from "./daily-claims";
 import { SignOutButton } from "./sign-out-button";
 
-const DEMO_GAMES = [
-  { name: "CRASH", ko: "크래시", desc: "배율이 오르다 터져요. 터지기 전에 빼면 이겨요." },
-  { name: "MINES", ko: "지뢰찾기", desc: "지뢰를 피해 보석을 열수록 배율이 올라가요." },
-  { name: "PLINKO", ko: "플링코", desc: "공이 핀에 튕기며 떨어져 아래 칸 배율만큼 받아요." },
-  { name: "CHICKEN", ko: "치킨 크로싱", desc: "한 칸씩 건널수록 배율이 올라가요." },
-  { name: "HILO", ko: "하이로", desc: "다음 카드가 높을지 낮을지 맞혀요." },
-  { name: "DICE · LIMBO · WHEEL", ko: "빠른 게임", desc: "한 번에 결과가 나오는 게임 셋." },
+const SOLO_GAMES = [
+  { name: "CRASH", ko: "크래시 · 다 같이", desc: "배율이 오르다 터져요. 터지기 전에 빼면 이겨요.", href: "/games/crash.html" },
+  { name: "MINES", ko: "지뢰찾기", desc: "지뢰를 피해 보석을 열수록 배율이 올라가요.", href: "/games/mines.html" },
+  { name: "PLINKO", ko: "플링코", desc: "공이 핀에 튕기며 떨어져 아래 칸 배율만큼 받아요.", href: "/games/plinko.html" },
+  { name: "CHICKEN", ko: "치킨 크로싱", desc: "한 칸씩 건널수록 배율이 올라가요.", href: "/games/chicken.html" },
+  { name: "HILO", ko: "하이로", desc: "다음 카드가 높을지 낮을지 맞혀요.", href: "/games/hilo.html" },
+  { name: "DICE · LIMBO · WHEEL", ko: "빠른 게임", desc: "한 번에 결과가 나오는 게임 셋.", href: "/games/quick.html" },
 ];
 
 export default async function Lobby() {
@@ -62,16 +62,20 @@ export default async function Lobby() {
         </Link>
       </div>
 
-      <h2 className="mt-8 mb-3 text-sm font-bold tracking-widest text-accent">혼자 하는 게임 · 서버 연결 준비 중</h2>
+      <div className="mt-8 mb-3 flex items-baseline justify-between">
+        <h2 className="text-sm font-bold tracking-widest text-accent">빠르게 한 판</h2>
+        <Link href="/fair" className="text-xs text-muted underline">공정성 · 내 시드 확인</Link>
+      </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {DEMO_GAMES.map((g) => (
-          <div key={g.name} className="panel p-5 opacity-60">
+        {SOLO_GAMES.map((g) => (
+          // public/games/*.html은 Next 라우트가 아니라 정적 파일이라 <a>로 이동
+          <a key={g.name} href={g.href} className="panel block p-5 transition hover:-translate-y-0.5">
             <div className="flex items-baseline justify-between gap-2">
               <span className="font-display text-xl tracking-widest">{g.name}</span>
               <span className="text-sm text-muted">{g.ko}</span>
             </div>
             <p className="mt-2 text-sm text-muted">{g.desc}</p>
-          </div>
+          </a>
         ))}
       </div>
     </main>

@@ -126,6 +126,79 @@ describe("세션형 게임", () => {
   });
 });
 
+describe("평가 반영: 끝까지 가는 판", () => {
+  it("mines: finding every gem pays out (24 mines → first gem wins)", async () => {
+    const u = await createUser();
+    const s = await startSession(u.id, "mines", 100, { mines: 24 });
+    const [{ secret }] = await db`select secret from private.solo_secrets where bet_id = ${s.betId}`;
+    const gem = [...Array(25).keys()].find((t) => !secret.board.includes(t))!;
+    const r = await stepSession(u.id, "mines", { tile: gem });
+    expect(r.status).toBe("won");
+    expect(r.payout).toBe(Math.floor((100 * 2475) / 100)); // 0.99 × 25 = 24.75×
+  });
+
+  it("mines: clearing all 22 gems with 3 mines auto cashes out", async () => {
+    const u = await createUser();
+    const s = await startSession(u.id, "mines", 10, { mines: 3 });
+    const [{ secret }] = await db`select secret from private.solo_secrets where bet_id = ${s.betId}`;
+    const gems = [...Array(25).keys()].filter((t) => !secret.board.includes(t));
+    let r;
+    for (const g of gems) r = await stepSession(u.id, "mines", { tile: g });
+    expect(r!.status).toBe("won");
+    expect(r!.payout).toBeGreaterThan(10);
+  });
+
+  it("hilo: running out of cards ends the round instead of locking it", async () => {
+    const u = await createUser();
+    const s = await startSession(u.id, "hilo", 100, {});
+    await db`update public.solo_bets set state = jsonb_set(state, '{index}', '199') where id = ${s.betId}`;
+    const r = await stepSession(u.id, "hilo", { guess: "skip" });
+    expect(r.status).toBe("won");
+    expect(r.payout).toBe(100); // 맞힌 게 없으면 베팅액 그대로
+    await expect(rotateSeed(u.id)).resolves.toBeTruthy();
+  });
+
+  it("rejects prototype keys as chicken difficulty with a 400-type error", async () => {
+    const u = await createUser();
+    await expect(startSession(u.id, "chicken", 100, { difficulty: "__proto__" })).rejects.toThrow(/난이도/);
+    await expect(playInstant(u.id, "dice", 2_000_000, { mode: "under", target: 50 })).rejects.toThrow(/최대/);
+  });
+
+  it("every finished bet verifies against the revealed seed", async () => {
+    const u = await createUser();
+    await playInstant(u.id, "dice", 100, { mode: "over", target: 30 });
+    await playInstant(u.id, "limbo", 100, { target100: 150 });
+    await playInstant(u.id, "wheel", 100, { risk: "high", segments: 10 });
+    await playInstant(u.id, "plinko", 100, { rows: 12, risk: "med" });
+    const m = await startSession(u.id, "mines", 100, { mines: 5 });
+    const [{ secret }] = await db`select secret from private.solo_secrets where bet_id = ${m.betId}`;
+    await stepSession(u.id, "mines", { tile: secret.board[0] }); // 지뢰 밟기
+    const c = await startSession(u.id, "chicken", 100, { difficulty: "hell" });
+    if (c.status === "active") await cashoutSession(u.id, "chicken");
+    const h = await startSession(u.id, "hilo", 100, {});
+    await stepSession(u.id, "hilo", { guess: "skip" });
+    const [{ secret: hs }] = await db`select secret from private.solo_secrets where bet_id = ${h.betId}`;
+    const cur = hs.cards[1].rank;
+    const guess = cur === 1 ? "same" : cur === 13 ? "same" : "hi";
+    const g = await stepSession(u.id, "hilo", { guess });
+    if (g.status === "active") await cashoutSession(u.id, "hilo");
+
+    const fair = await getFairness(u.id);
+    const { revealedServerSeed } = await rotateSeed(u.id);
+    const { verifySoloBet } = await import("../lib/engine/solo/verify");
+    const bets = await db`select game, nonce::int, stake::int, payout::int, params, state, status
+                          from public.solo_bets where user_id = ${u.id} order by nonce`;
+    expect(bets).toHaveLength(7);
+    for (const b of bets) {
+      const ok = verifySoloBet(b as never, { serverSeed: revealedServerSeed, clientSeed: fair.current.clientSeed, userId: u.id });
+      expect([b.game, ok]).toEqual([b.game, true]);
+    }
+    // 기록을 조작하면 불일치
+    const forged = { ...bets[0], payout: bets[0].payout + 1 };
+    expect(verifySoloBet(forged as never, { serverSeed: revealedServerSeed, clientSeed: fair.current.clientSeed, userId: u.id })).toBe(false);
+  });
+});
+
 describe("Crash", () => {
   async function freshRound() {
     // 진행 중인 라운드를 끝내고 새 라운드가 열리게 한다
@@ -172,6 +245,29 @@ describe("Crash", () => {
     expect(after.bets.find((x) => x.userId === b.id)!.payout).toBe(101);
     expect(await balance(b.id)).toBe(10001);
     expect(await balance(a.id)).toBe(10000 - 100 + mine.payout!);
+  });
+
+  it("hides other players' bets from the API until the round crashes, and rounds verify", async () => {
+    const v = await freshRound();
+    await db`update public.crash_rounds set betting_ends_at = now() + interval '1 minute' where id = ${v.round.id}`;
+    const a = await createUser();
+    const b = await createUser();
+    await crashBet(a.id, 100, 500);
+    const { data: seen } = await b.client.from("crash_bets").select("user_id, auto100").eq("round_id", v.round.id);
+    expect(seen).toEqual([]);
+    const { data: own } = await a.client.from("crash_bets").select("auto100").eq("round_id", v.round.id);
+    expect(own).toEqual([{ auto100: 500 }]);
+    // 이 라운드를 터뜨린다 (터지는 시각만 당기고 배율은 그대로)
+    await db`update public.crash_rounds set betting_ends_at = now() - interval '1 second' where id = ${v.round.id}`;
+    await db`update private.crash_secrets set crash_ms = 0 where round_id = ${v.round.id}`;
+    await crashState(a.id);
+    const { data: after } = await b.client.from("crash_bets").select("auto100").eq("round_id", v.round.id);
+    expect(after).toEqual([{ auto100: 500 }]);
+    const { verifyCrashRound } = await import("../lib/engine/solo/verify");
+    const [r] = await db`select commit_hash, seed, crash_point100 from public.crash_rounds where id = ${v.round.id}`;
+    expect(verifyCrashRound({ commit: r.commit_hash, seed: r.seed, crashPoint100: r.crash_point100 })).toBe(true);
+    // 배율을 바꿔 치면 검증에 걸린다
+    expect(verifyCrashRound({ commit: r.commit_hash, seed: r.seed, crashPoint100: r.crash_point100 + 1 })).toBe(false);
   });
 
   it("rejects bets after betting closes", async () => {

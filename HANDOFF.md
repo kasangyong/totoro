@@ -5,7 +5,7 @@
 
 ---
 
-## ★ 현재 상태 (2026-10-01 갱신)
+## ★ 현재 상태 (2026-10-01 갱신, 배포 직전)
 §0~§8은 브라우저 데모(`*-demo.html`, `site/`) 기준 기록. 그 뒤로 **서버 앱 `app/`** 이 생겼다 — 실행법은 [`app/README.md`](app/README.md).
 
 | 항목 | 상태 |
@@ -14,7 +14,9 @@
 | 멀티 방 + **섯다**(2장, 특수패·구사 재경기·재참여) | 완료 |
 | 멀티 방 + **7포커**(초이스 룰) | 완료 |
 | 판 검증 페이지 (`/verify/[handId]`) | 완료 — 커밋·시드·액션 기록으로 브라우저에서 재계산 |
-| 혼자 하는 8개 게임 서버 연결 | 아직 (로비에 "준비 중") |
+| 혼자 하는 8개 게임 서버 연결 | 완료 — 데모 화면 그대로 `app/public/games/*.html`, 결과·포인트는 서버 ([`docs/design/solo-api.md`](docs/design/solo-api.md)) |
+| 공정성 페이지 (`/fair`) | 완료 — 내 시드 확인·교체, 지난 판·Crash 라운드 재계산 |
+| 섯다·포커 족보 패널 | 완료 — 낮은 족보부터 나열, 내 패 칸 강조 |
 | 배포 | 마지막 — [`docs/deploy-checklist.md`](docs/deploy-checklist.md) 먼저 |
 
 설계·규칙 문서: [`docs/design/rooms-arch.md`](docs/design/rooms-arch.md), [`docs/design/card-games-rules.md`](docs/design/card-games-rules.md). 규칙 확정 사항(땡잡이·암행어사가 잡으면 승, 레이즈 인당 라운드 2회, 구사 재경기 재참여 판돈 절반)은 규칙 문서에 "확정"으로 표시.

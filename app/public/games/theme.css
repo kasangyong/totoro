@@ -1,0 +1,79 @@
+/* 배팅 할래 말래 · 공통 테마
+   방향: 카지노 테이블. 짙은 초록 펠트 위에 금색 테두리, 칩 모양 버튼, 크림색 글자.
+   각 게임 페이지의 <style> 다음에 불러와서 같은 이름의 색 토큰을 덮어씀 */
+:root{
+  --bg:#08221b; --felt:#0e3a2e; --felt-hi:#15523f;
+  --panel:#0d3027; --raise:#164035; --raise-hi:#1d4d40; --line:#2a5747;
+  --fg:#f4eddc; --muted:#a3b8aa;
+  --accent:#e4b650; --accent-ink:#2b1d04; --gold-dim:#8a6f33;
+  --hot:#ff9446; --blue:#6aa5ff;
+  --win:#74eab0; --win-ink:#05281a; --bust:#ff6b5b; --ball:#ffe7a8;
+  --card:#fbf7ec; --card-ink:#1c2030; --card-red:#c9242f;
+  --display:"Oswald","IBM Plex Sans KR",system-ui,sans-serif;
+  --logo:"Black Han Sans","IBM Plex Sans KR",system-ui,sans-serif;
+  --body:"IBM Plex Sans KR",system-ui,-apple-system,"Malgun Gothic",sans-serif;
+  color-scheme:dark;
+}
+html,body{margin:0}
+[hidden]{display:none!important}
+body{
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(120% 80% at 50% 0%,var(--felt-hi) 0%,var(--felt) 40%,var(--bg) 100%);
+  background-color:var(--bg);background-attachment:fixed;min-height:100vh;color:var(--fg);font-family:var(--body)
+}
+
+/* 머리글: 로비로 돌아가기 + 게임 이름 + 소리 + 지갑 */
+.top{padding-bottom:14px;border-bottom:1px solid color-mix(in srgb,var(--accent) 28%,transparent)}
+.top > .back{order:-1}
+.back{display:inline-flex;align-items:center;gap:4px;color:var(--accent);text-decoration:none;font-weight:700;font-size:13px;border:1px solid var(--gold-dim);border-radius:999px;padding:5px 12px;background:rgba(0,0,0,.18)}
+.back:hover{background:rgba(228,182,80,.12)}
+.top{flex-wrap:wrap}
+.top .lead{display:flex;align-items:center;gap:12px;min-width:0}
+.brand{font-family:var(--display);font-weight:700;letter-spacing:.14em;color:var(--fg)}
+.brand span{font-family:var(--logo);font-weight:400;letter-spacing:0;color:var(--accent);border-color:var(--gold-dim);background:rgba(0,0,0,.2)}
+.wallet{align-items:center;border-radius:999px;border:1px solid var(--gold-dim);background:linear-gradient(180deg,var(--panel),var(--bg));padding:5px 16px 5px 8px}
+.wallet::before{content:"";width:22px;height:22px;border-radius:50%;flex:none;
+  background:radial-gradient(circle,var(--accent) 0 45%,transparent 46%),repeating-conic-gradient(var(--accent) 0 30deg,var(--fg) 30deg 60deg);
+  box-shadow:inset 0 0 0 2px var(--accent)}
+.wallet b{font-family:var(--display);color:var(--accent);letter-spacing:.02em}
+.ghost{border-color:var(--line);background:rgba(0,0,0,.15)}
+
+/* 판(게임 화면)과 패널 */
+.stage{border:2px solid var(--gold-dim);border-radius:18px;
+  background:radial-gradient(90% 80% at 50% 38%,var(--felt-hi) 0%,var(--felt) 55%,var(--bg) 100%);
+  box-shadow:inset 0 0 70px rgba(0,0,0,.5),0 0 0 4px rgba(0,0,0,.22),0 14px 34px rgba(0,0,0,.4)}
+.panel{border:1px solid var(--gold-dim);border-radius:18px;
+  background:linear-gradient(180deg,var(--panel),color-mix(in srgb,var(--panel) 82%,#000));
+  box-shadow:0 0 0 4px rgba(228,182,80,.06),0 14px 30px rgba(0,0,0,.35)}
+.rules,.tablewrap,.ladwrap,.trailwrap{background:rgba(0,0,0,.2);border-color:var(--line)}
+h2{color:var(--accent);letter-spacing:.1em}
+h2 small{color:var(--muted);letter-spacing:0}
+.mult,.big{text-shadow:0 3px 0 rgba(0,0,0,.35)}
+.mult.idle,.big:not(.win):not(.lose){color:var(--fg);opacity:.72}
+input[type=number]{background:rgba(0,0,0,.28);border-color:var(--line);font-family:var(--display)}
+.facts{background:rgba(0,0,0,.24)}
+.q{background:rgba(0,0,0,.22);border-color:var(--line)}
+.seg .q.on,.presets .q.on{border-color:var(--accent);color:var(--accent);background:rgba(228,182,80,.1)}
+.tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
+.tabs{border-bottom-color:color-mix(in srgb,var(--accent) 28%,transparent)}
+
+/* 칩 모양 금액 버튼 (½ · ×2 · 최대) */
+.amtrow{grid-template-columns:minmax(0,1fr) repeat(3,46px);align-items:center}
+.q.amtq{width:46px;height:46px;padding:0;border-radius:50%;border:0;color:#fff;font-family:var(--display);font-weight:700;font-size:13px;
+  background:radial-gradient(circle,var(--chip) 0 50%,transparent 51%),repeating-conic-gradient(var(--chip) 0 22.5deg,var(--fg) 22.5deg 45deg);
+  box-shadow:inset 0 0 0 3px var(--chip),inset 0 0 0 5px rgba(255,255,255,.25),0 3px 0 rgba(0,0,0,.4);text-shadow:0 1px 0 rgba(0,0,0,.4);transition:transform .08s}
+.q.amtq:hover:not(:disabled){transform:translateY(-2px)}
+.q.amtq[data-q=half]{--chip:#2c64c4}
+.q.amtq[data-q=double]{--chip:#b8302a}
+.q.amtq[data-q=max]{--chip:#1b1b1b}
+
+/* 큰 버튼: 금색, 캐시아웃은 초록 */
+.main{background:linear-gradient(180deg,#f3cd6c 0%,var(--accent) 55%,#b8892b 100%);color:var(--accent-ink);
+  box-shadow:0 4px 0 #6f5217,0 10px 20px rgba(0,0,0,.35);border-radius:12px;text-shadow:0 1px 0 rgba(255,255,255,.35)}
+.main:active:not(:disabled){transform:translateY(3px);box-shadow:0 1px 0 #6f5217,0 4px 10px rgba(0,0,0,.35)}
+.main.cash,.cash:not(:disabled){background:linear-gradient(180deg,#a6f6cf 0%,var(--win) 55%,#39a877 100%);color:var(--win-ink);box-shadow:0 4px 0 #1c5f42,0 10px 20px rgba(0,0,0,.35)}
+.main.cancel,.main:disabled,.cash:disabled{background:rgba(0,0,0,.25);color:var(--muted);box-shadow:none;text-shadow:none;border:1px solid var(--line)}
+.second{background:rgba(0,0,0,.15)}
+.rescue{border-color:var(--accent);color:var(--accent)}
+.chip{background:rgba(0,0,0,.25)}

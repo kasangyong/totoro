@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>치킨 크로싱 · 배팅 할래 말래</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: 옆으로 이어진 도로(캔버스)가 주인공, 오른쪽에 베팅 패널, 아래에 배율표·기록·규칙 (앞 데모들과 같은 톤) */
+:root{
+  --bg:#0e1322; --panel:#161d31; --raise:#1f2842; --line:#2b3654;
+  --fg:#e9edf7; --muted:#8a95b2;
+  --accent:#ffb23f; --accent-ink:#241600;
+  --win:#3fd49b; --win-ink:#04210f; --bust:#ff5a5f;
+  --asphalt:#1a2135; --curb:#3a4462;
+  --display:"Oswald","IBM Plex Sans KR",system-ui,sans-serif;
+  --body:"IBM Plex Sans KR",system-ui,-apple-system,"Malgun Gothic",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.5}
+.app{max-width:1120px;margin:0 auto;padding-inline:16px;padding-block:16px 48px;display:flex;flex-direction:column;gap:16px}
+
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.12em}
+.brand span{font-family:var(--body);font-weight:500;font-size:12px;letter-spacing:.04em;color:var(--muted);margin-left:8px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;vertical-align:middle}
+.topright{display:flex;align-items:center;gap:10px}
+.wallet{display:flex;align-items:baseline;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 14px}
+.wallet .lbl{color:var(--muted);font-size:12px}
+.wallet b{font-family:var(--display);font-size:20px;font-variant-numeric:tabular-nums;color:var(--accent)}
+.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+.ghost:hover{color:var(--fg)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"stage panel" "ladder panel" "hist rules";gap:16px;align-items:start}
+@media (max-width:820px){.grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"stage" "panel" "ladder" "hist" "rules"}}
+
+.stage{grid-area:stage;position:relative;aspect-ratio:16/9;max-width:100%;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--asphalt)}
+@media (max-width:520px){.stage{aspect-ratio:4/3.4}}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.readout{position:absolute;left:12px;top:12px;background:color-mix(in srgb,var(--bg) 78%,transparent);border:1px solid var(--line);border-radius:10px;padding:8px 12px;pointer-events:none;max-width:calc(100% - 24px)}
+.mult{font-family:var(--display);font-weight:700;font-size:clamp(26px,4.4vw,40px);line-height:1;font-variant-numeric:tabular-nums}
+.mult.idle{color:var(--muted)} .mult.win{color:var(--win)} .mult.bust{color:var(--bust)}
+.sub{margin-top:4px;color:var(--muted);font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+.sub b{color:var(--fg);font-weight:500}
+.toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-weight:500;white-space:nowrap;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.toast.win{border-color:var(--win);color:var(--win)}
+.toast.bust{border-color:var(--bust);color:var(--bust)}
+.shake{animation:shake .35s}
+@keyframes shake{20%{transform:translate(-6px,2px)}40%{transform:translate(5px,-3px)}60%{transform:translate(-4px,1px)}80%{transform:translate(3px,-1px)}}
+@media (prefers-reduced-motion:reduce){.shake{animation:none}}
+
+.panel{grid-area:panel;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.panel label,.lbl2{font-size:12px;color:var(--muted);letter-spacing:.03em}
+.field{display:flex;flex-direction:column;gap:6px}
+input[type=number]{width:100%;min-width:0;background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:10px 12px;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+input:disabled,.q:disabled{opacity:.5;cursor:not-allowed}
+.amtrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px}
+.q{background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:0 10px;font-family:var(--display);font-size:14px;cursor:pointer}
+.q:hover:not(:disabled){border-color:var(--muted)}
+.seg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.seg .q{padding:8px 0;font-family:var(--body);font-weight:500}
+.seg .q.on{border-color:var(--accent);color:var(--accent)}
+.facts{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;background:var(--raise);border-radius:10px;padding:10px 12px}
+.facts div{display:flex;flex-direction:column;min-width:0}
+.facts dt{font-size:11px;color:var(--muted)}
+.facts dd{margin:0;font-family:var(--display);font-size:15px;font-variant-numeric:tabular-nums}
+.main{border:0;border-radius:10px;padding:16px 12px;font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.02em;cursor:pointer;background:var(--accent);color:var(--accent-ink);font-variant-numeric:tabular-nums}
+.main:active:not(:disabled){transform:translateY(1px)}
+.main:disabled{background:var(--raise);color:var(--muted);cursor:default}
+.cash{border:0;border-radius:10px;padding:13px 12px;font-family:var(--display);font-weight:700;font-size:16px;cursor:pointer;background:var(--win);color:var(--win-ink);font-variant-numeric:tabular-nums}
+.cash:disabled{background:var(--raise);color:var(--muted);cursor:default}
+.hint{margin:-4px 0 0;color:var(--muted);font-size:12px;text-align:center}
+.hint kbd{font-family:var(--display);font-size:11px;border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.rescue{background:transparent;border:1px dashed var(--accent);color:var(--accent);border-radius:10px;padding:10px;font:inherit;font-weight:500;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stats{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.stats div{display:flex;flex-direction:column;gap:2px}
+.stats dt{font-size:11px;color:var(--muted)}
+.stats dd{margin:0;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+
+h2{margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+h2 small{font-weight:400;margin-left:6px}
+.ladder{grid-area:ladder;min-width:0}
+.ladwrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
+.lad{display:flex;gap:6px;width:max-content}
+.step{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:64px;padding:6px 8px;border-radius:8px;background:var(--raise);border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.step small{font-size:11px;color:var(--muted)}
+.step b{font-family:var(--display);font-size:14px;font-weight:500}
+.step.done{border-color:color-mix(in srgb,var(--win) 45%,var(--line))}
+.step.done b{color:var(--win)}
+.step.next{border-color:var(--accent)}
+.step.next b{color:var(--accent)}
+.hist{grid-area:hist;min-width:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;font-variant-numeric:tabular-nums;padding:3px 10px;border-radius:999px;background:var(--raise);border:1px solid var(--line);color:var(--muted)}
+.chip b{font-family:var(--display);font-weight:500;margin-left:4px}
+.chip.win b{color:var(--win)} .chip.lose b{color:var(--bust)}
+.none{color:var(--muted);font-size:13px}
+.rules{grid-area:rules;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.rules ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.rules p{margin:10px 0 0;color:var(--muted);font-size:12px}
+.w{color:var(--win)} .l{color:var(--bust)}
+</style>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <a class="back" href="/">‹ 로비</a>
+    <div class="brand">CHICKEN CROSSING<span>배팅 할래 말래</span></div>
+    <div class="topright">
+      <button id="snd" class="ghost" type="button">소리 켜짐</button>
+      <div class="wallet"><span class="lbl">보유</span><b id="bal">—</b><span>P</span></div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="stage" id="stage">
+      <canvas id="cv"></canvas>
+      <div class="readout">
+        <div id="mult" class="mult idle">1.00×</div>
+        <div id="sub" class="sub">금액과 난이도를 정하고 출발하세요</div>
+      </div>
+      <div class="toast" id="toast" hidden></div>
+    </section>
+
+    <aside class="panel">
+      <div class="field">
+        <label for="amt">베팅 금액 (P)</label>
+        <div class="amtrow">
+          <input id="amt" type="number" min="10" step="10" value="500" inputmode="numeric">
+          <button class="q amtq" type="button" data-q="half">½</button>
+          <button class="q amtq" type="button" data-q="double">×2</button>
+          <button class="q amtq" type="button" data-q="max">최대</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl2" id="difL">난이도</span>
+        <div class="seg" role="group" aria-labelledby="difL">
+          <button class="q df" type="button" data-d="easy">쉬움</button>
+          <button class="q df" type="button" data-d="medium">보통</button>
+          <button class="q df" type="button" data-d="hard">어려움</button>
+          <button class="q df" type="button" data-d="hell">지옥</button>
+        </div>
+      </div>
+      <dl class="facts">
+        <div><dt>차선 수</dt><dd id="fLanes">—</dd></div>
+        <div><dt>한 칸 사고율</dt><dd id="fRisk">—</dd></div>
+        <div><dt>끝까지 가면</dt><dd id="fMax">—</dd></div>
+      </dl>
+      <button id="main" class="main" type="button">출발하기</button>
+      <button id="cash" class="cash" type="button" disabled>캐시아웃</button>
+      <p class="hint"><kbd>Space</kbd> 앞으로 · <kbd>C</kbd> 캐시아웃</p>
+      <dl class="stats">
+        <div><dt>참여한 판</dt><dd id="stRounds">0</dd></div>
+        <div><dt>총 수익</dt><dd id="stProfit">0</dd></div>
+        <div><dt>최고 배율</dt><dd id="stBest">—</dd></div>
+      </dl>
+    </aside>
+
+    <section class="ladder">
+      <h2>배율표<small>몇 번째 차선까지 건너면 몇 배인지</small></h2>
+      <div class="ladwrap" id="ladwrap"><div class="lad" id="lad"></div></div>
+    </section>
+
+    <section class="hist">
+      <h2>최근 게임</h2>
+      <div class="chips" id="hist"></div>
+    </section>
+
+    <section class="rules">
+      <h2>규칙</h2>
+      <ol>
+        <li>금액과 난이도를 정하고 출발해요.</li>
+        <li>'앞으로'를 누를 때마다 닭이 차선을 하나 건너고 배율이 올라가요.</li>
+        <li>건너는 차선에서 차에 치이면 건 포인트를 잃어요.</li>
+        <li>차선을 하나라도 건넜으면 언제든 캐시아웃할 수 있어요.</li>
+        <li>마지막 차선까지 건너면 자동으로 캐시아웃돼요.</li>
+      </ol>
+      <p>칸마다 사고 확률은 같아요. 배율은 여기까지 살아남을 확률의 역수에 0.99를 곱한 값이라 기대 환급률은 99%예요. Mines와 원리는 같고 연출만 달라요. 실제 돈은 쓰지 않아요.</p>
+      <p>결과는 서버가 정해요 · 시드 확인은 로비의 공정성 페이지</p>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/riffwave.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/sfxr.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.floor(n).toLocaleString('ko-KR');
+  const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
+  const fmtMult = m => (m >= 1000 ? fmt(m) : m.toFixed(2)) + '×';
+  // 서버 CHICKEN 표와 같음 (app/lib/engine/solo/games.ts). 판정은 서버가 함
+  const DIFF = {
+    easy:   { name: '쉬움', lanes: 24, p: 0.92, s: 92 },
+    medium: { name: '보통', lanes: 22, p: 0.84, s: 84 },
+    hard:   { name: '어려움', lanes: 20, p: 0.76, s: 76 },
+    hell:   { name: '지옥', lanes: 15, p: 0.60, s: 60 }
+  };
+  const dOf = d => DIFF[d] || DIFF.medium;
+  // 서버 chickenMult100과 같은 정수 연산: floor(99 × 100^n / s^n), 0칸이면 100
+  const m100For = (d, n) => n === 0 ? 100 : Number((99n * 100n ** BigInt(n)) / BigInt(dOf(d).s) ** BigInt(n));
+  const multFor = (d, n) => m100For(d, n) / 100;
+  const payFor = (bet, m100) => Math.floor(bet * m100 / 100);
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+  let bal = 0, ready = false, busyReq = false, stats, history, diff = 'medium';
+  let phase = 'idle';   // idle | play | hop | dying | over
+  let game = null;      // { bet, d, n, dead, won, payout }
+  let pos = 0, anim = null, killer = null, feathers = [], pending = null;   // pending = 애니메이션 끝나고 반영할 서버 응답
+  function save() { store.set('chicken.stats', stats); store.set('chicken.hist', history); }
+
+  // ---------- 서버 ----------
+  async function api(path, body) {
+    const opt = body === undefined ? { credentials: 'same-origin' }
+      : { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    const res = await fetch(path, opt);
+    if (res.status === 401) { location.href = '/login'; const e = new Error('로그인이 필요해요'); e.silent = true; throw e; }
+    let j = null; try { j = await res.json(); } catch (e) {}
+    if (!res.ok || !j || !j.ok) throw new Error((j && j.error) || '서버 오류가 났어요');
+    return j.data;
+  }
+  const fail = e => { if (!e.silent) toast(e.message || '서버 오류가 났어요', 'bust'); };
+  // 서버의 진행 중인 판·잔액으로 화면을 맞춤 (처음 열 때, 새로고침, 오류 뒤)
+  function syncState() {
+    return api('/api/solo/chicken/state', {}).then(d => {
+      bal = d.balance; ready = true;
+      if (phase === 'hop' || phase === 'dying') { update(); return; }
+      const ses = d.session;
+      if (ses && ses.state) {
+        const s = ses.state;
+        diff = DIFF[s.difficulty] ? s.difficulty : diff;
+        game = { bet: ses.stake, d: diff, n: s.crossed, dead: false, won: false };
+        pos = s.crossed; anim = null; killer = null; feathers = []; phase = 'play';
+      } else if (phase === 'play') {
+        phase = 'idle'; game = null; pos = 0; feathers = [];
+      }
+      update();
+    }).catch(fail);
+  }
+
+  // ---------- 소리 ----------
+  let actx = null, soundOn = true;
+  function unlockAudio() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (actx && actx.state === 'suspended') actx.resume();
+  }
+  function tone(f, d, type = 'sine', vol = .12, delay = 0, f2) {
+    if (!actx || !soundOn) return;
+    const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + d + .02);
+  }
+  $('snd').addEventListener('click', () => { unlockAudio(); soundOn = !soundOn; $('snd').textContent = soundOn ? '소리 켜짐' : '소리 꺼짐'; });
+
+  // ---------- jsfxr 효과음 · canvas-confetti 폭죽 (CDN을 못 불러오면 위의 tone()으로 대신함) ----------
+  const SFX = (() => {
+    const lib = window.jsfxr && window.jsfxr.sfxr, defs = {}, bufs = {};
+    const make = (name, algo, tweak) => {
+      if (!lib) return;
+      try { const p = lib.generate(algo); if (tweak) tweak(p); defs[name] = p; } catch (e) {}
+    };
+    make('bet', 'blipSelect');
+    make('coin', 'pickupCoin');
+    make('big', 'powerUp');
+    make('boom', 'explosion');
+    make('hit', 'hitHurt');
+    make('tick', 'blipSelect', p => { p.p_env_sustain = 0.02; p.p_env_decay = 0.05; });
+    return {
+      play(name, vol = 1, rate = 1) {
+        if (!lib || !actx || !soundOn || !defs[name]) return false;
+        try {
+          if (!bufs[name]) bufs[name] = lib.toWebAudio(defs[name], actx).buffer;
+          const src = actx.createBufferSource(), g = actx.createGain();
+          src.buffer = bufs[name]; src.playbackRate.value = rate; g.gain.value = vol;
+          src.connect(g).connect(actx.destination); src.start();
+          return true;
+        } catch (e) { return false; }
+      }
+    };
+  })();
+  const CONFETTI_COLORS = ['#ffb23f', '#3fd49b', '#ff5a5f', '#e9edf7', '#ffe3a3'];
+  // level 0: 작은 폭죽, 1: 큰 폭죽, 2: 양옆에서 한 번 더
+  function burst(level, el) {
+    if (level < 0 || !window.confetti || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = (el || document.body).getBoundingClientRect();
+    const origin = { x: (r.left + r.width / 2) / innerWidth, y: Math.max(0.1, Math.min(0.9, (r.top + r.height * 0.55) / innerHeight)) };
+    const colors = CONFETTI_COLORS;
+    confetti({ particleCount: 30 + level * 50, spread: 55 + level * 25, startVelocity: 30 + level * 12, origin, colors, disableForReducedMotion: true });
+    if (level >= 2) {
+      confetti({ particleCount: 80, angle: 60, spread: 60, origin: { x: 0, y: 0.8 }, colors, disableForReducedMotion: true });
+      confetti({ particleCount: 80, angle: 120, spread: 60, origin: { x: 1, y: 0.8 }, colors, disableForReducedMotion: true });
+    }
+  }
+  const burstLevel = m => m >= 100 ? 2 : m >= 10 ? 1 : m >= 2 ? 0 : -1;
+
+  let toastTimer = 0;
+  function toast(msg, kind = '') {
+    const el = $('toast'); el.textContent = msg; el.className = 'toast ' + kind; el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2400);
+  }
+
+  // ---------- 게임 ----------
+  // 출발: 서버가 바로 첫 차선을 건넘 (치일 수도 있음)
+  function startGame() {
+    if (!ready || busyReq) return;
+    const a = Math.floor(Number($('amt').value));
+    if (!(a >= 10)) { toast('10P 이상부터 걸 수 있어요', 'bust'); return; }
+    if (a > bal) { toast(`보유 포인트(${fmt(bal)}P)보다 많이 걸 수 없어요`, 'bust'); return; }
+    const d = diff;
+    busyReq = true; bal -= a; update();
+    api('/api/solo/chicken/start', { bet: a, params: { difficulty: d } }).then(r => {
+      busyReq = false;
+      game = { bet: a, d, n: 0, dead: false, won: false };
+      pos = 0; anim = null; killer = null; feathers = []; cars = [];
+      phase = 'play';
+      SFX.play('bet', .5) || tone(520, .08, 'square', .05);
+      applyStep(r);
+    }).catch(e => { busyReq = false; bal += a; fail(e); update(); syncState(); });
+  }
+
+  // 앞으로: 서버에 한 칸 요청
+  function forward() {
+    if (phase !== 'play' || busyReq) return;
+    busyReq = true; update();
+    api('/api/solo/chicken/step', {}).then(r => { busyReq = false; applyStep(r); })
+      .catch(e => { busyReq = false; fail(e); update(); syncState(); });
+  }
+
+  function applyStep(r) {
+    pending = r;
+    const dead = r.status === 'lost';
+    step(dead, dead ? (r.state.deathLane || pos + 1) : r.state.crossed);
+  }
+
+  function step(dead, lane) {
+    if (phase !== 'play') return;
+    const survive = !dead;
+    const now = performance.now(), G = geoNow();
+    anim = { from: pos, to: lane, t0: now, dead: !survive };
+    const inLane = cars.filter(c => c.lane === lane);
+    if (survive) {
+      // 멀리 있는 차는 차단선 앞에 세우고, 닭 근처에 있는 차는 흐려지며 사라짐
+      inLane.forEach(c => {
+        if (c.y < G.stopY) c.stopAt = G.stopY;
+        else if (c.y < G.cy + G.lw) c.fadeT = now;
+      });
+    } else {
+      // 이미 내려오고 있던 차 중 닭에 가장 가까운 차가 그대로 달려와서 부딪힘. 없으면 위에서 새로 들어옴
+      const above = inLane.filter(c => c.y < G.cy - G.lw * 0.3).sort((a, b) => b.y - a.y);
+      const hitter = above[0];
+      const y0 = hitter ? hitter.y : -G.lw;
+      const color = hitter ? hitter.color : CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
+      if (hitter) cars = cars.filter(c => c !== hitter);
+      // 그 뒤에 오던 차는 사고 지점 뒤에서 멈춤, 닭 근처에 있던 차는 사라짐
+      inLane.forEach(c => {
+        if (c === hitter) return;
+        if (c.y < y0) c.stopAt = Math.min(y0, G.cy - G.lw * 1.3);
+        else c.fadeT = now;
+      });
+      // 닭이 착지한 뒤에 도착. 멀리서 오면 다른 차들 중 빠른 편인 속도로 보이게 내려옴
+      const hitY = G.cy - G.lw * 0.1, dur = Math.max(520, (hitY - y0) / (G.h / 800));
+      killer = { lane, y0, hitY, t0: now, dur, color };
+      game.killColor = color;
+      tone(330, .28, 'sawtooth', .05, .12, 900);  // 경적
+    }
+    phase = 'hop';
+    SFX.play('tick', .35) || tone(700, .06, 'square', .04);
+    update();
+  }
+
+  function afterHop(now) {
+    pos = anim.to;
+    if (anim.dead) {
+      phase = 'dying';
+    } else {
+      const r = pending; pending = null;
+      game.n = r ? r.state.crossed : pos; phase = 'play';
+      if (r) bal = r.balance;
+      SFX.play('coin', .6, 0.8 * Math.pow(2, Math.min(game.n, 24) / 18)) || tone(440 * Math.pow(2, Math.min(game.n, 24) / 12), .12, 'triangle', .1);
+      if (r && r.status === 'won') settleWin(r, true);   // 마지막 차선 → 서버가 자동 캐시아웃
+    }
+    anim = null; update();
+  }
+
+  function die() {
+    if (pending) { bal = pending.balance; pending = null; }
+    phase = 'over'; game.dead = true; killer = null;
+    stats.rounds++; stats.profit -= game.bet;
+    history.unshift({ d: game.d, n: game.n, m: 0 }); history = history.slice(0, 16);
+    save();
+    if (!SFX.play('hit')) tone(200, .5, 'sawtooth', .08, 0, 45);
+    SFX.play('boom', .7);
+    const st = $('stage'); st.classList.remove('shake'); void st.offsetWidth; st.classList.add('shake');
+    for (let i = 0; i < 18; i++) feathers.push({ a: Math.random() * Math.PI * 2, v: .4 + Math.random() * .9, t0: performance.now(), rot: Math.random() * 6 });
+    toast(`쾅! ${pos}번째 차선에서 치였어요 · ${fmt(game.bet)}P 잃음`, 'bust');
+    update();
+  }
+
+  function cashout() {
+    if (phase !== 'play' || !game || game.n === 0 || busyReq) return;
+    busyReq = true; update();
+    api('/api/solo/chicken/cashout', {}).then(r => { busyReq = false; settleWin(r, false); })
+      .catch(e => { busyReq = false; fail(e); update(); syncState(); });
+  }
+
+  function settleWin(r, all) {
+    const m = r.state.mult100 / 100, win = r.payout;
+    game.n = r.state.crossed; game.payout = win;
+    bal = r.balance; phase = 'over'; game.won = true;
+    stats.rounds++; stats.profit += win - game.bet; stats.best = Math.max(stats.best || 0, m);
+    history.unshift({ d: game.d, n: game.n, m }); history = history.slice(0, 16);
+    save();
+    toast(`${all ? '끝까지 건넜어요! ' : ''}${fmtMult(m)} 캐시아웃 · ${fmt(win)}P 받음`, 'win');
+    if (!SFX.play('big')) { tone(660, .12, 'triangle'); tone(880, .12, 'triangle', .12, .09); tone(1320, .22, 'triangle', .12, .18); }
+    burst(all ? Math.max(1, burstLevel(m)) : burstLevel(m), $('stage'));
+    update();
+  }
+
+  function mainAction() {
+    unlockAudio();
+    if (phase === 'idle' || phase === 'over') startGame();
+    else if (phase === 'play') forward();
+  }
+  $('main').addEventListener('click', mainAction);
+  $('cash').addEventListener('click', () => { unlockAudio(); cashout(); });
+  document.addEventListener('keydown', e => {
+    const onBtn = document.activeElement?.tagName === 'BUTTON';
+    if (e.code === 'Space' && !onBtn) { e.preventDefault(); mainAction(); }
+    if ((e.key === 'c' || e.key === 'C' || e.key === 'ㅊ') && document.activeElement?.tagName !== 'INPUT') cashout();
+  });
+  document.querySelectorAll('.amtq').forEach(btn => btn.addEventListener('click', () => {
+    const inp = $('amt'), v = Math.floor(Number(inp.value) || 0), q = btn.dataset.q;
+    const nv = q === 'half' ? Math.floor(v / 2) : q === 'double' ? v * 2 : bal;
+    inp.value = Math.max(10, Math.min(Math.floor(bal), nv) || 10);
+    update();
+  }));
+  $('amt').addEventListener('input', update);
+  document.querySelectorAll('.df').forEach(b => b.addEventListener('click', () => {
+    if (inGame() || busyReq) return;
+    diff = b.dataset.d; store.set('chicken.diff', diff);
+    if (phase === 'over') { phase = 'idle'; game = null; pos = 0; feathers = []; }
+    update();
+  }));
+  const inGame = () => phase === 'play' || phase === 'hop' || phase === 'dying';
+
+  // ---------- 그리기 ----------
+  const cv = $('cv'), ctx = cv.getContext('2d');
+  const css = getComputedStyle(document.documentElement);
+  const C = k => css.getPropertyValue(k).trim();
+  const col = { bg: C('--bg'), asphalt: C('--asphalt'), curb: C('--curb'), line: C('--line'), raise: C('--raise'), fg: C('--fg'), muted: C('--muted'), accent: C('--accent'), win: C('--win'), bust: C('--bust') };
+  const CAR_COLORS = ['#4f8cff', '#ff5a5f', '#3fd49b', '#b07cff', '#ffb23f', '#dfe5f2'];
+  let cars = [], cam = 0, lastT = 0;
+  function geoNow() {
+    const h = cv.getBoundingClientRect().height;
+    const lw = Math.max(64, Math.min(120, h * 0.24)), cy = h * 0.58;
+    return { h, lw, cy, stopY: cy - lw * 1.5 };
+  }
+
+  function rr(x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  function drawCar(x, y, lw, color) {
+    const w = lw * 0.58, h = lw * 1.05;
+    rr(x - w / 2, y - h / 2, w, h, w * 0.22); ctx.fillStyle = color; ctx.fill();
+    ctx.fillStyle = 'rgba(8,12,24,.55)';
+    rr(x - w * 0.36, y + h * 0.05, w * 0.72, h * 0.22, 4); ctx.fill();   // 앞유리 (차는 아래로 달림)
+    rr(x - w * 0.34, y - h * 0.34, w * 0.68, h * 0.16, 4); ctx.fill();   // 뒷유리
+    ctx.fillStyle = '#fff6c9';
+    ctx.fillRect(x - w * 0.4, y + h / 2 - 4, w * 0.18, 3); ctx.fillRect(x + w * 0.22, y + h / 2 - 4, w * 0.18, 3);
+  }
+
+  function drawChicken(x, y, s, squash) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(1 + squash * 0.6, 1 - squash * 0.65);
+    // 그림자
+    ctx.beginPath(); ctx.ellipse(0, s * 0.95, s * 0.7, s * 0.18, 0, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fill();
+    // 다리
+    ctx.strokeStyle = '#ffb23f'; ctx.lineWidth = Math.max(2, s * 0.1); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-s * 0.2, s * 0.55); ctx.lineTo(-s * 0.25, s * 0.9); ctx.moveTo(s * 0.2, s * 0.55); ctx.lineTo(s * 0.25, s * 0.9); ctx.stroke();
+    // 몸
+    ctx.beginPath(); ctx.ellipse(0, s * 0.1, s * 0.7, s * 0.62, 0, 0, Math.PI * 2); ctx.fillStyle = '#f7f3e8'; ctx.fill();
+    // 날개
+    ctx.beginPath(); ctx.ellipse(-s * 0.18, s * 0.2, s * 0.34, s * 0.24, -0.4, 0, Math.PI * 2); ctx.fillStyle = '#e2dccb'; ctx.fill();
+    // 벼슬
+    ctx.fillStyle = '#ff5a5f';
+    ctx.beginPath(); ctx.arc(s * 0.15, -s * 0.52, s * 0.14, 0, Math.PI * 2); ctx.arc(s * 0.35, -s * 0.46, s * 0.12, 0, Math.PI * 2); ctx.fill();
+    // 부리
+    ctx.beginPath(); ctx.moveTo(s * 0.62, -s * 0.12); ctx.lineTo(s * 0.92, -s * 0.02); ctx.lineTo(s * 0.62, s * 0.08); ctx.closePath(); ctx.fillStyle = '#ffb23f'; ctx.fill();
+    // 눈
+    ctx.beginPath(); ctx.arc(s * 0.38, -s * 0.2, s * 0.08, 0, Math.PI * 2); ctx.fillStyle = '#111'; ctx.fill();
+    ctx.restore();
+  }
+
+  function frame(now) {
+    const dt = Math.min(50, now - (lastT || now)); lastT = now;
+    const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    const W = Math.round(r.width * d), H = Math.round(r.height * d);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    const w = r.width, h = r.height;
+    const dKey = game && phase !== 'idle' ? game.d : diff, D = dOf(dKey);
+    const lanes = D.lanes;
+    const lw = Math.max(64, Math.min(120, h * 0.24)), sw = lw * 1.3;
+    const sceneW = sw * 2 + lanes * lw;
+    const laneX = i => i === 0 ? sw / 2 : i > lanes ? sw + lanes * lw + sw / 2 : sw + (i - 1) * lw + lw / 2;
+    const cy = h * 0.58;
+
+    // 애니메이션 진행
+    let cx = laneX(pos), hopY = 0;
+    if (anim) {
+      const u = Math.min(1, (now - anim.t0) / 300);
+      cx = laneX(anim.from) + (laneX(anim.to) - laneX(anim.from)) * u;
+      hopY = -Math.sin(Math.PI * u) * lw * 0.3;
+      if (u >= 1) afterHop(now);
+    }
+    const target = Math.max(0, Math.min(sceneW - w, cx - w * 0.35));
+    cam += (target - cam) * Math.min(1, dt / 120);
+    if (sceneW <= w) cam = (sceneW - w) / 2;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.save(); ctx.translate(-cam, 0);
+
+    // 인도 (출발·도착)
+    [0, sw + lanes * lw].forEach((x0, k) => {
+      ctx.fillStyle = col.curb; ctx.fillRect(x0, 0, sw, h);
+      ctx.strokeStyle = col.line; ctx.lineWidth = 1;
+      for (let y = 0; y < h; y += lw * 0.5) { ctx.beginPath(); ctx.moveTo(x0, y + .5); ctx.lineTo(x0 + sw, y + .5); ctx.stroke(); }
+      ctx.fillStyle = col.fg; ctx.globalAlpha = .7;
+      ctx.font = `700 ${Math.round(lw * 0.16)}px "IBM Plex Sans KR", system-ui, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(k ? '도착' : '출발', x0 + sw / 2, h * 0.14);
+      ctx.globalAlpha = 1;
+    });
+
+    // 차선
+    const n = game && phase !== 'idle' ? game.n : 0;
+    for (let i = 1; i <= lanes; i++) {
+      const x0 = sw + (i - 1) * lw;
+      ctx.fillStyle = col.asphalt; ctx.fillRect(x0, 0, lw, h);
+      if (i > 1) {
+        ctx.strokeStyle = 'rgba(233,237,247,.35)'; ctx.lineWidth = 2; ctx.setLineDash([lw * 0.3, lw * 0.3]);
+        ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0, h); ctx.stroke(); ctx.setLineDash([]);
+      }
+      // 배율 맨홀
+      const m = multFor(dKey, i);
+      const passed = i <= n && !(game && game.dead && i === pos);
+      const current = inGame() && i === n + 1;
+      ctx.beginPath(); ctx.arc(x0 + lw / 2, cy, lw * 0.34, 0, Math.PI * 2);
+      ctx.fillStyle = passed ? 'rgba(63,212,155,.18)' : current ? 'rgba(255,178,63,.16)' : 'rgba(233,237,247,.06)'; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = passed ? col.win : current ? col.accent : col.line; ctx.stroke();
+      if (!(Math.round(cx) === Math.round(x0 + lw / 2) && phase !== 'over')) {
+        ctx.fillStyle = passed ? col.win : current ? col.accent : col.fg;
+        ctx.font = `700 ${Math.round(lw * 0.17)}px "Oswald", system-ui, sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(fmtMult(m), x0 + lw / 2, cy);
+      }
+      // 지나온 차선의 차단기
+      if (passed) {
+        const by = cy - lw * 0.95, bw = lw * 0.7;
+        ctx.fillStyle = col.accent; rr(x0 + (lw - bw) / 2, by, bw, lw * 0.14, 3); ctx.fill();
+        ctx.fillStyle = '#241600';
+        for (let s = 0; s < 4; s++) ctx.fillRect(x0 + (lw - bw) / 2 + bw * (0.08 + s * 0.24), by, bw * 0.1, lw * 0.14);
+      }
+    }
+
+    // 지나가는 차 (앞쪽 차선에만)
+    const visFrom = Math.max(1, Math.floor((cam - sw) / lw)), visTo = Math.min(lanes, Math.ceil((cam + w - sw) / lw) + 1);
+    for (let i = visFrom; i <= visTo; i++) {
+      const blocked = i <= n || (inGame() && i === pos) || (anim && i === anim.to) || (killer && killer.lane === i) || (phase === 'over' && i === pos);
+      if (!blocked && Math.random() < dt / 2600 && !cars.some(c => c.lane === i && c.y < lw * 1.4)) {
+        cars.push({ lane: i, y: -lw, v: h / (900 + Math.random() * 900), color: CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)] });
+      }
+    }
+    cars = cars.filter(c => c.y < h + lw && !(c.fadeT && now - c.fadeT > 220));
+    cars.forEach(c => {
+      c.y += c.v * dt; if (c.stopAt != null) c.y = Math.min(c.y, c.stopAt);
+      if (c.fadeT) ctx.globalAlpha = Math.max(0, 1 - (now - c.fadeT) / 220);
+      drawCar(laneX(c.lane), c.y, lw, c.color);
+      ctx.globalAlpha = 1;
+    });
+
+    // 닭을 치러 오는 차: 이미 오던 차가 속도를 올려 그대로 내려옴
+    if (killer) {
+      const u = Math.min(1, (now - killer.t0) / killer.dur);
+      drawCar(laneX(killer.lane), killer.y0 + (killer.hitY - killer.y0) * u, lw, killer.color);
+      if (u >= 1 && phase === 'dying') die();
+    }
+
+    // 닭
+    const dead = phase === 'over' && game?.dead;
+    drawChicken(cx, cy - lw * 0.05 + hopY, lw * 0.27, dead ? 1 : 0);
+    if (dead) drawCar(laneX(pos), cy + lw * 0.55, lw, game.killColor || col.bust);
+
+    // 깃털
+    feathers.forEach(f => {
+      const t = (now - f.t0) / 1000; if (t > 1.4) return;
+      const fx = laneX(pos) + Math.cos(f.a) * f.v * lw * t * 1.2, fy = cy + Math.sin(f.a) * f.v * lw * t * 1.2 + 60 * t * t;
+      ctx.save(); ctx.translate(fx, fy); ctx.rotate(f.rot + t * 4); ctx.globalAlpha = Math.max(0, 1 - t / 1.4);
+      ctx.beginPath(); ctx.ellipse(0, 0, lw * 0.07, lw * 0.025, 0, 0, Math.PI * 2); ctx.fillStyle = '#f7f3e8'; ctx.fill();
+      ctx.restore();
+    });
+
+    ctx.restore();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- 화면 갱신 ----------
+  function update() {
+    const d = game && phase !== 'idle' ? game.d : diff, D = dOf(d);
+    const n = game && phase !== 'idle' ? game.n : 0;
+    const lock = inGame();
+    $('bal').textContent = ready ? fmt(bal) : '—';
+    document.querySelectorAll('.df').forEach(b => { b.classList.toggle('on', b.dataset.d === d); b.disabled = lock || busyReq; });
+    $('amt').disabled = lock || busyReq;
+    document.querySelectorAll('.amtq').forEach(b => { b.disabled = lock || busyReq; });
+    $('fLanes').textContent = D.lanes + '개';
+    $('fRisk').textContent = Math.round((1 - D.p) * 100) + '%';
+    $('fMax').textContent = fmtMult(multFor(d, D.lanes));
+
+    const mult = $('mult'), sub = $('sub');
+    if (phase === 'idle') {
+      mult.textContent = '1.00×'; mult.className = 'mult idle';
+      sub.innerHTML = `${D.name} · 첫 차선만 건너도 <b>${fmtMult(multFor(d, 1))}</b>`;
+    } else if (lock) {
+      const nx = Math.min(n + 1, D.lanes);
+      mult.textContent = fmtMult(multFor(d, n)); mult.className = n ? 'mult' : 'mult idle';
+      sub.innerHTML = phase === 'dying' ? '위험해요!' : `다음 차선 <b>${fmtMult(multFor(d, nx))}</b> · 성공 확률 <b>${Math.round(D.p * 100)}%</b>`;
+    } else if (game.dead) {
+      mult.textContent = '쾅!'; mult.className = 'mult bust';
+      sub.innerHTML = `차선 ${n}개 건너고 치였어요 · <span class="l">${signed(-game.bet)}P</span>`;
+    } else {
+      const m = multFor(d, n);
+      mult.textContent = fmtMult(m); mult.className = 'mult win';
+      sub.innerHTML = `차선 ${n}개 건너고 캐시아웃 · <span class="w">${signed((game.payout ?? payFor(game.bet, m100For(d, n))) - game.bet)}P</span>`;
+    }
+
+    const btn = $('main'), cash = $('cash'), amt = Math.floor(Number($('amt').value) || 0);
+    if (!lock) { btn.textContent = `${phase === 'over' ? '한 판 더' : '출발하기'} · ${fmt(amt)}P`; btn.disabled = busyReq || !ready; }
+    else { btn.textContent = `앞으로 → ${fmtMult(multFor(d, Math.min(n + 1, D.lanes)))}`; btn.disabled = phase !== 'play' || busyReq; }
+    cash.disabled = !(phase === 'play' && n > 0) || busyReq;
+    cash.textContent = phase === 'play' && n > 0 ? `캐시아웃 · ${fmt(payFor(game.bet, m100For(d, n)))}P` : '캐시아웃';
+
+    $('stRounds').textContent = fmt(stats.rounds);
+    const pf = $('stProfit'); pf.textContent = signed(stats.profit); pf.className = stats.profit > 0 ? 'w' : stats.profit < 0 ? 'l' : '';
+    $('stBest').textContent = stats.best ? fmtMult(stats.best) : '—';
+
+    const steps = [];
+    for (let i = 1; i <= D.lanes; i++) {
+      const cls = i <= n ? 'step done' : (lock && i === n + 1) ? 'step next' : 'step';
+      steps.push(`<div class="${cls}"><small>${i}번째</small><b>${fmtMult(multFor(d, i))}</b></div>`);
+    }
+    $('lad').innerHTML = steps.join('');
+    const wrap = $('ladwrap'), t = $('lad').children[Math.max(0, n - 1)];
+    if (t) wrap.scrollLeft = Math.max(0, t.offsetLeft - wrap.clientWidth / 2 + t.offsetWidth / 2);
+
+    $('hist').innerHTML = history.length ? history.map(g =>
+      `<span class="chip ${g.m ? 'win' : 'lose'}">${dOf(g.d).name} · ${g.n}칸<b>${g.m ? fmtMult(g.m) : '쾅'}</b></span>`).join('')
+      : '<span class="none">아직 한 판도 안 했어요</span>';
+  }
+
+  function start() {
+    stats = store.get('chicken.stats', { rounds: 0, profit: 0, best: 0 });
+    history = store.get('chicken.hist', []);
+    const sd = store.get('chicken.diff', 'medium'); if (DIFF[sd]) diff = sd;
+    update();
+    requestAnimationFrame(frame);
+    // 지갑 표시 → 진행 중인 판이 있으면 이어서
+    api('/api/me').then(me => { bal = me.balance; ready = true; update(); }).catch(fail).then(syncState);
+  }
+  start();
+})();
+</script>
+
+<script>
+  // 뒤로 가기로 돌아왔을 때 다른 게임에서 바뀐 지갑을 다시 읽음
+  addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+</script>
+</body>
+</html>

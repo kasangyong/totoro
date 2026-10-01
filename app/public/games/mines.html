@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mines · 배팅 할래 말래</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: 5×5 판이 주인공, 오른쪽에 베팅 패널, 아래에 배율표·기록·규칙 (Crash 데모와 같은 톤) */
+:root{
+  --bg:#0e1322; --panel:#161d31; --raise:#1f2842; --raise-hi:#28334f; --line:#2b3654;
+  --fg:#e9edf7; --muted:#8a95b2;
+  --accent:#ffb23f; --accent-ink:#241600;
+  --win:#3fd49b; --win-ink:#04210f; --bust:#ff5a5f;
+  --display:"Oswald","IBM Plex Sans KR",system-ui,sans-serif;
+  --body:"IBM Plex Sans KR",system-ui,-apple-system,"Malgun Gothic",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.5}
+.app{max-width:1120px;margin:0 auto;padding-inline:16px;padding-block:16px 48px;display:flex;flex-direction:column;gap:16px}
+
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.12em}
+.brand span{font-family:var(--body);font-weight:500;font-size:12px;letter-spacing:.04em;color:var(--muted);margin-left:8px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;vertical-align:middle}
+.topright{display:flex;align-items:center;gap:10px}
+.wallet{display:flex;align-items:baseline;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 14px}
+.wallet .lbl{color:var(--muted);font-size:12px}
+.wallet b{font-family:var(--display);font-size:20px;font-variant-numeric:tabular-nums;color:var(--accent)}
+.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+.ghost:hover{color:var(--fg)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"stage panel" "ladder panel" "hist rules";gap:16px;align-items:start}
+@media (max-width:820px){.grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"stage" "panel" "ladder" "hist" "rules"}}
+
+.stage{grid-area:stage;position:relative;border:1px solid var(--line);border-radius:14px;padding:18px 16px 20px;
+  background:radial-gradient(120% 90% at 50% 0%,#1b2440 0%,var(--bg) 75%);display:flex;flex-direction:column;align-items:center;gap:14px}
+.readout{text-align:center}
+.mult{font-family:var(--display);font-weight:700;font-size:clamp(38px,7vw,64px);line-height:1;font-variant-numeric:tabular-nums;transition:color .15s}
+.mult.idle{color:var(--muted)} .mult.win{color:var(--win)} .mult.bust{color:var(--bust)}
+.sub{margin-top:6px;color:var(--muted);font-size:14px;font-weight:500;font-variant-numeric:tabular-nums}
+.sub b{color:var(--fg);font-weight:500}
+.board{width:100%;max-width:520px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:clamp(6px,1.4vw,10px)}
+.tile{aspect-ratio:1;max-width:100%;border-radius:10px;background:var(--raise);border:1px solid var(--line);box-shadow:inset 0 -4px 0 rgba(0,0,0,.28);
+  cursor:pointer;display:grid;place-items:center;padding:0;color:var(--fg);transition:transform .08s,background .12s}
+.tile:hover:not(:disabled){background:var(--raise-hi);transform:translateY(-2px)}
+.tile:disabled{cursor:default}
+.tile svg{width:56%;height:56%;display:block}
+.tile.gem{background:color-mix(in srgb,var(--win) 16%,var(--panel));border-color:color-mix(in srgb,var(--win) 45%,var(--line));color:var(--win);box-shadow:none}
+.tile.mine{background:color-mix(in srgb,var(--bust) 26%,var(--panel));border-color:var(--bust);color:var(--bust);box-shadow:none}
+.tile.dim{opacity:.4}
+.tile.pop{animation:pop .22s ease-out}
+@keyframes pop{0%{transform:scale(.7)}70%{transform:scale(1.08)}100%{transform:scale(1)}}
+.shake{animation:shake .35s}
+@keyframes shake{20%{transform:translate(-6px,2px)}40%{transform:translate(5px,-3px)}60%{transform:translate(-4px,1px)}80%{transform:translate(3px,-1px)}}
+@media (prefers-reduced-motion:reduce){.tile.pop,.shake{animation:none}.tile{transition:none}}
+.toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-weight:500;white-space:nowrap;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis;z-index:2;pointer-events:none}
+.toast.win{border-color:var(--win);color:var(--win)}
+.toast.bust{border-color:var(--bust);color:var(--bust)}
+
+.panel{grid-area:panel;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.panel label,.lbl2{font-size:12px;color:var(--muted);letter-spacing:.03em}
+.field{display:flex;flex-direction:column;gap:6px}
+input[type=number]{width:100%;min-width:0;background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:10px 12px;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+input:disabled,.q:disabled{opacity:.5;cursor:not-allowed}
+.amtrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px}
+.q{background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:0 10px;font-family:var(--display);font-size:14px;cursor:pointer}
+.q:hover:not(:disabled){border-color:var(--muted)}
+.minehead{display:flex;justify-content:space-between;align-items:baseline}
+.minehead b{font-family:var(--display);font-size:18px;color:var(--bust);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--bust)}
+.presets{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.presets .q{padding:6px 0}
+.presets .q.on{border-color:var(--bust);color:var(--bust)}
+.main{border:0;border-radius:10px;padding:16px 12px;font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.02em;cursor:pointer;background:var(--accent);color:var(--accent-ink);font-variant-numeric:tabular-nums}
+.main.cash{background:var(--win);color:var(--win-ink)}
+.main:disabled{background:var(--raise);color:var(--muted);cursor:default}
+.main:active:not(:disabled){transform:translateY(1px)}
+.second{background:transparent;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:10px;font:inherit;font-weight:500;cursor:pointer}
+.second:hover{border-color:var(--muted)}
+.rescue{background:transparent;border:1px dashed var(--accent);color:var(--accent);border-radius:10px;padding:10px;font:inherit;font-weight:500;cursor:pointer;text-align:center;text-decoration:none}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stats{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.stats div{display:flex;flex-direction:column;gap:2px}
+.stats dt{font-size:11px;color:var(--muted)}
+.stats dd{margin:0;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+
+h2{margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+h2 small{font-weight:400;margin-left:6px}
+.ladder{grid-area:ladder;min-width:0}
+.ladwrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
+.lad{display:flex;gap:6px;width:max-content}
+.step{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:64px;padding:6px 8px;border-radius:8px;background:var(--raise);border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.step small{font-size:11px;color:var(--muted)}
+.step b{font-family:var(--display);font-size:14px;font-weight:500}
+.step.done{border-color:color-mix(in srgb,var(--win) 45%,var(--line))}
+.step.done b{color:var(--win)}
+.step.next{border-color:var(--accent)}
+.step.next b{color:var(--accent)}
+
+.hist{grid-area:hist;min-width:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;font-variant-numeric:tabular-nums;padding:3px 10px;border-radius:999px;background:var(--raise);border:1px solid var(--line);color:var(--muted)}
+.chip b{font-family:var(--display);font-weight:500;margin-left:4px}
+.chip.win b{color:var(--win)} .chip.lose b{color:var(--bust)}
+.none{color:var(--muted);font-size:13px}
+
+.rules{grid-area:rules;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.rules ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.rules p{margin:10px 0 0;color:var(--muted);font-size:12px}
+.w{color:var(--win)} .l{color:var(--bust)}
+</style>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <a class="back" href="/">‹ 로비</a>
+    <div class="brand">MINES<span>배팅 할래 말래</span></div>
+    <div class="topright">
+      <button id="snd" class="ghost" type="button">소리 켜짐</button>
+      <div class="wallet"><span class="lbl">보유</span><b id="bal">10,000</b><span>P</span></div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="stage" id="stage">
+      <div class="readout">
+        <div id="mult" class="mult idle">1.00×</div>
+        <div id="sub" class="sub">금액과 지뢰 수를 정하고 시작해 보세요</div>
+      </div>
+      <div class="board" id="board" aria-label="5×5 게임판"></div>
+      <div class="toast" id="toast" hidden></div>
+    </section>
+
+    <aside class="panel">
+      <div class="field">
+        <label for="amt">베팅 금액 (P)</label>
+        <div class="amtrow">
+          <input id="amt" type="number" min="10" step="10" value="500" inputmode="numeric">
+          <button class="q amtq" type="button" data-q="half">½</button>
+          <button class="q amtq" type="button" data-q="double">×2</button>
+          <button class="q amtq" type="button" data-q="max">최대</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="minehead"><label for="mines">지뢰 개수</label><b id="minesV">3</b></div>
+        <input id="mines" type="range" min="1" max="24" value="3">
+        <div class="presets">
+          <button class="q mq" type="button" data-m="1">1</button>
+          <button class="q mq" type="button" data-m="3">3</button>
+          <button class="q mq" type="button" data-m="5">5</button>
+          <button class="q mq" type="button" data-m="10">10</button>
+          <button class="q mq" type="button" data-m="24">24</button>
+        </div>
+      </div>
+      <button id="main" class="main" type="button">게임 시작</button>
+      <button id="rand" class="second" type="button" hidden>아무 칸이나 열기</button>
+      <a id="rescue" class="rescue" href="/" hidden>포인트가 바닥났어요 · 로비에서 구제금 받기</a>
+      <dl class="stats">
+        <div><dt>참여한 판</dt><dd id="stRounds">0</dd></div>
+        <div><dt>총 수익</dt><dd id="stProfit">0</dd></div>
+        <div><dt>최고 배율</dt><dd id="stBest">—</dd></div>
+      </dl>
+    </aside>
+
+    <section class="ladder">
+      <h2>배율표<small>보석을 몇 개 찾으면 몇 배인지</small></h2>
+      <div class="ladwrap" id="ladwrap"><div class="lad" id="lad"></div></div>
+    </section>
+
+    <section class="hist">
+      <h2>최근 게임</h2>
+      <div class="chips" id="hist"></div>
+    </section>
+
+    <section class="rules">
+      <h2>규칙</h2>
+      <ol>
+        <li>금액과 지뢰 개수를 정하고 시작해요. 25칸 중 그만큼 지뢰가 숨어요.</li>
+        <li>칸을 열어 보석이 나오면 배율이 올라가요.</li>
+        <li>지뢰가 나오면 건 포인트를 잃고 판이 끝나요.</li>
+        <li>보석을 하나라도 찾았으면 언제든 캐시아웃할 수 있어요.</li>
+        <li>보석을 전부 찾으면 자동으로 캐시아웃돼요.</li>
+      </ol>
+      <p>지뢰가 많을수록 한 칸마다 배율이 크게 뛰어요. 배율은 살아남을 확률의 역수에 0.99를 곱한 값이라 기대 환급률은 99%예요. 실제 돈은 쓰지 않아요.</p>
+      <p>결과는 서버가 정해요 · 시드 확인은 로비의 공정성 페이지</p>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/riffwave.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/sfxr.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.floor(n).toLocaleString('ko-KR');
+  const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
+  const N = 25, EDGE = 0.99;
+
+  // 배율표 표시용 (실제 배율·지급은 서버 state.mult100 / payout을 씀)
+  function multFor(k, n) {
+    if (n === 0) return 1;
+    let m = 1;
+    for (let i = 0; i < n; i++) m *= (N - i) / (N - k - i);
+    return Math.floor(m * EDGE * 100) / 100;
+  }
+  const fmtMult = m => (m >= 1000 ? fmt(m) : m.toFixed(2)) + '×';
+  const payOf = (bet, m100) => Math.floor(bet * m100 / 100);
+
+  // ---------- 서버 ----------
+  async function api(path, body) {
+    let res;
+    try {
+      res = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store' });
+    } catch (e) { throw new Error('서버에 연결하지 못했어요'); }
+    if (res.status === 401) { location.href = '/login'; throw new Error('로그인이 필요해요'); }
+    let j = null; try { j = await res.json(); } catch (e) {}
+    if (!res.ok || !j || !j.ok) throw new Error((j && j.error) || '요청을 처리하지 못했어요');
+    return j.data;
+  }
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+  let bal = null, stats, history;
+  let phase = 'idle';            // idle | play | over
+  let busy = false;              // 서버 요청 중이면 입력 막음
+  let game = null;               // { bet, k, revealed:[], board:[]|null, hit, mult100, next100, payout }
+  function save() { store.set('mines.stats', stats); store.set('mines.hist', history); }
+
+  // ---------- 소리 ----------
+  let actx = null, soundOn = true;
+  function unlockAudio() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (actx && actx.state === 'suspended') actx.resume();
+  }
+  function tone(f, d, type = 'sine', vol = .12, delay = 0, f2) {
+    if (!actx || !soundOn) return;
+    const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + d + .02);
+  }
+  $('snd').addEventListener('click', () => { unlockAudio(); soundOn = !soundOn; $('snd').textContent = soundOn ? '소리 켜짐' : '소리 꺼짐'; });
+
+  // ---------- jsfxr 효과음 · canvas-confetti 폭죽 (CDN을 못 불러오면 위의 tone()으로 대신함) ----------
+  const SFX = (() => {
+    const lib = window.jsfxr && window.jsfxr.sfxr, defs = {}, bufs = {};
+    const make = (name, algo, tweak) => {
+      if (!lib) return;
+      try { const p = lib.generate(algo); if (tweak) tweak(p); defs[name] = p; } catch (e) {}
+    };
+    make('bet', 'blipSelect');
+    make('coin', 'pickupCoin');
+    make('big', 'powerUp');
+    make('boom', 'explosion');
+    make('hit', 'hitHurt');
+    make('tick', 'blipSelect', p => { p.p_env_sustain = 0.02; p.p_env_decay = 0.05; });
+    return {
+      play(name, vol = 1, rate = 1) {
+        if (!lib || !actx || !soundOn || !defs[name]) return false;
+        try {
+          if (!bufs[name]) bufs[name] = lib.toWebAudio(defs[name], actx).buffer;
+          const src = actx.createBufferSource(), g = actx.createGain();
+          src.buffer = bufs[name]; src.playbackRate.value = rate; g.gain.value = vol;
+          src.connect(g).connect(actx.destination); src.start();
+          return true;
+        } catch (e) { return false; }
+      }
+    };
+  })();
+  const CONFETTI_COLORS = ['#ffb23f', '#3fd49b', '#ff5a5f', '#e9edf7', '#ffe3a3'];
+  // level 0: 작은 폭죽, 1: 큰 폭죽, 2: 양옆에서 한 번 더
+  function burst(level, el) {
+    if (level < 0 || !window.confetti || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = (el || document.body).getBoundingClientRect();
+    const origin = { x: (r.left + r.width / 2) / innerWidth, y: Math.max(0.1, Math.min(0.9, (r.top + r.height * 0.55) / innerHeight)) };
+    const colors = CONFETTI_COLORS;
+    confetti({ particleCount: 30 + level * 50, spread: 55 + level * 25, startVelocity: 30 + level * 12, origin, colors, disableForReducedMotion: true });
+    if (level >= 2) {
+      confetti({ particleCount: 80, angle: 60, spread: 60, origin: { x: 0, y: 0.8 }, colors, disableForReducedMotion: true });
+      confetti({ particleCount: 80, angle: 120, spread: 60, origin: { x: 1, y: 0.8 }, colors, disableForReducedMotion: true });
+    }
+  }
+  const burstLevel = m => m >= 100 ? 2 : m >= 10 ? 1 : m >= 2 ? 0 : -1;
+
+  let toastTimer = 0;
+  function toast(msg, kind = '') {
+    const el = $('toast'); el.textContent = msg; el.className = 'toast ' + kind; el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2400);
+  }
+
+  // ---------- 판 ----------
+  const GEM = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12l4 6-10 12L2 9z" fill="currentColor"/><path d="M2 9h20M9 3l3 6 3-6M12 9v12" stroke="rgba(0,0,0,.28)" stroke-width="1.2" fill="none"/></svg>';
+  const MINE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="6.5" fill="currentColor"/><circle cx="10" cy="10" r="1.8" fill="#fff" opacity=".55"/></svg>';
+  const tiles = [];
+  for (let i = 0; i < N; i++) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'tile'; b.id = 't' + i;
+    b.setAttribute('aria-label', `${Math.floor(i / 5) + 1}행 ${i % 5 + 1}열`);
+    b.addEventListener('click', () => openTile(i));
+    $('board').appendChild(b); tiles.push(b);
+  }
+
+  // 찾은 보석 = revealed 중 밟은 지뢰를 뺀 칸
+  const gems = () => game ? game.revealed.filter(i => i !== game.hit) : [];
+
+  function renderBoard(popIdx) {
+    const found = gems(), mines = game && game.board ? new Set(game.board) : null;
+    tiles.forEach((b, i) => {
+      let cls = 'tile', html = '';
+      if (game) {
+        if (found.includes(i)) { cls += ' gem'; html = GEM; }
+        else if (i === game.hit) { cls += ' mine'; html = MINE; }
+        else if (phase === 'over' && mines) {
+          if (mines.has(i)) { cls += ' mine dim'; html = MINE; }
+          else { cls += ' gem dim'; html = GEM; }
+        }
+      }
+      if (i === popIdx) cls += ' pop';
+      b.className = cls; b.innerHTML = html;
+      b.disabled = busy || phase !== 'play' || (game && game.revealed.includes(i));
+    });
+  }
+
+  function mineCount() { return Number($('mines').value); }
+
+  function fail(e) {
+    busy = false;
+    toast(e && e.message ? e.message : '요청을 처리하지 못했어요', 'bust');
+    renderBoard(); update();
+  }
+
+  async function startGame() {
+    if (busy) return;
+    const a = Math.floor(Number($('amt').value));
+    if (!(a >= 10)) { toast('10P 이상부터 걸 수 있어요', 'bust'); return; }
+    if (bal != null && a > bal) { toast(`보유 포인트(${fmt(bal)}P)보다 많이 걸 수 없어요`, 'bust'); return; }
+    const k = mineCount();
+    busy = true; renderBoard(); update();
+    let d;
+    try { d = await api('/api/solo/mines/start', { bet: a, params: { mines: k } }); } catch (e) { fail(e); return; }
+    busy = false;
+    bal = d.balance;
+    const st = d.state;
+    game = { bet: a, k: st.mines, revealed: st.revealed || [], board: null, hit: -1, mult100: st.mult100, next100: st.next100, payout: 0 };
+    phase = 'play';
+    SFX.play('bet', .5) || tone(520, .08, 'square', .05);
+    renderBoard(); update();
+  }
+
+  async function openTile(i) {
+    unlockAudio();
+    if (busy || phase !== 'play' || game.revealed.includes(i)) return;
+    busy = true; renderBoard(); update();
+    let d;
+    try { d = await api('/api/solo/mines/step', { params: { tile: i } }); } catch (e) { fail(e); return; }
+    busy = false;
+    bal = d.balance;
+    const st = d.state;
+    game.revealed = st.revealed; game.mult100 = st.mult100; game.next100 = st.next100;
+    if (d.status === 'lost') {
+      game.hit = i; game.board = st.board || null; phase = 'over';
+      stats.rounds++; stats.profit -= game.bet;
+      history.unshift({ k: game.k, n: gems().length, m: 0 }); history = history.slice(0, 16);
+      save();
+      SFX.play('boom', .9) || tone(240, .55, 'sawtooth', .08, 0, 45);
+      const stg = $('stage'); stg.classList.remove('shake'); void stg.offsetWidth; stg.classList.add('shake');
+      toast(`펑! 지뢰를 밟았어요 · ${fmt(game.bet)}P 잃음`, 'bust');
+      renderBoard(i); update();
+      return;
+    }
+    const n = gems().length;
+    SFX.play('coin', .6, 0.8 * Math.pow(2, Math.min(n, 20) / 18)) || tone(440 * Math.pow(2, Math.min(n, 20) / 12), .12, 'triangle', .1);
+    renderBoard(i);
+    if (d.status === 'won') { settle(d, true); return; }
+    update();
+  }
+
+  async function cashout() {
+    if (busy || phase !== 'play' || game.revealed.length === 0) return;
+    busy = true; renderBoard(); update();
+    let d;
+    try { d = await api('/api/solo/mines/cashout', {}); } catch (e) { fail(e); return; }
+    busy = false;
+    settle(d, false);
+  }
+
+  // 서버가 정산한 판(won)을 화면에 반영
+  function settle(d, all) {
+    const st = d.state;
+    bal = d.balance;
+    game.revealed = st.revealed; game.mult100 = st.mult100; game.board = st.board || null;
+    game.payout = typeof d.payout === 'number' ? d.payout : payOf(game.bet, st.mult100);
+    phase = 'over';
+    const m = game.mult100 / 100, win = game.payout;
+    stats.rounds++; stats.profit += win - game.bet; stats.best = Math.max(stats.best || 0, m);
+    history.unshift({ k: game.k, n: gems().length, m }); history = history.slice(0, 16);
+    save();
+    toast(`${all ? '보석을 전부 찾았어요! ' : ''}${fmtMult(m)} 캐시아웃 · ${fmt(win)}P 받음`, 'win');
+    if (!SFX.play('big')) { tone(660, .12, 'triangle'); tone(880, .12, 'triangle', .12, .09); tone(1320, .22, 'triangle', .12, .18); }
+    burst(all ? Math.max(1, burstLevel(m)) : burstLevel(m), $('stage'));
+    renderBoard(); update();
+  }
+
+  function openRandom() {
+    if (busy || phase !== 'play') return;
+    const left = tiles.map((_, i) => i).filter(i => !game.revealed.includes(i));
+    // 어떤 칸을 고를지만 정함 (지뢰 위치는 서버가 이미 정해 둠 — 결과와 무관)
+    openTile(left[Math.floor(Math.random() * left.length)]);
+  }
+
+  function mainAction() {
+    unlockAudio();
+    if (busy) return;
+    if (phase === 'play') cashout(); else startGame();
+  }
+  $('main').addEventListener('click', mainAction);
+  $('rand').addEventListener('click', openRandom);
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && document.activeElement?.tagName !== 'BUTTON') { e.preventDefault(); mainAction(); }
+  });
+
+  // ---------- 입력 ----------
+  document.querySelectorAll('.amtq').forEach(btn => btn.addEventListener('click', () => {
+    const inp = $('amt'), v = Math.floor(Number(inp.value) || 0), q = btn.dataset.q, b = bal || 0;
+    const nv = q === 'half' ? Math.floor(v / 2) : q === 'double' ? v * 2 : b;
+    inp.value = Math.max(10, Math.min(Math.floor(b), nv) || 10);
+    update();
+  }));
+  $('amt').addEventListener('input', update);
+  $('mines').addEventListener('input', update);
+  document.querySelectorAll('.mq').forEach(btn => btn.addEventListener('click', () => { $('mines').value = btn.dataset.m; update(); }));
+
+  // ---------- 화면 갱신 ----------
+  function update() {
+    const playing = phase === 'play';
+    const k = playing || phase === 'over' ? game.k : mineCount();
+    const n = game && phase !== 'idle' ? gems().length : 0;
+    $('bal').textContent = bal == null ? '—' : fmt(bal);
+    $('minesV').textContent = playing ? game.k : mineCount();
+    document.querySelectorAll('.mq').forEach(b => b.classList.toggle('on', Number(b.dataset.m) === (playing ? game.k : mineCount())));
+    ['amt', 'mines'].forEach(id => { $(id).disabled = playing || busy; });
+    document.querySelectorAll('.amtq,.mq').forEach(b => { b.disabled = playing || busy; });
+
+    // 위쪽 배율 표시 (진행 중 배율은 서버 값)
+    const mult = $('mult'), sub = $('sub');
+    if (phase === 'idle') {
+      mult.textContent = '1.00×'; mult.className = 'mult idle';
+      sub.innerHTML = `지뢰 ${k}개 · 첫 칸 성공하면 <b>${fmtMult(multFor(k, 1))}</b>`;
+    } else if (playing) {
+      const cur = game.mult100 / 100, next = game.next100 / 100, p = (N - k - n) / (N - n);
+      mult.textContent = fmtMult(cur); mult.className = n ? 'mult' : 'mult idle';
+      sub.innerHTML = `다음 칸 <b>${fmtMult(next)}</b> · 성공 확률 <b>${(p * 100).toFixed(1)}%</b>`;
+    } else if (game.hit >= 0) {
+      mult.textContent = '펑!'; mult.className = 'mult bust';
+      sub.innerHTML = `보석 ${n}개 찾고 지뢰를 밟았어요 · <span class="l">${signed(-game.bet)}P</span>`;
+    } else {
+      mult.textContent = fmtMult(game.mult100 / 100); mult.className = 'mult win';
+      sub.innerHTML = `보석 ${n}개 찾고 캐시아웃 · <span class="w">${signed(game.payout - game.bet)}P</span>`;
+    }
+
+    // 버튼
+    const btn = $('main'), amt = Math.floor(Number($('amt').value) || 0);
+    if (!playing) { btn.textContent = `${phase === 'over' ? '한 판 더' : '게임 시작'} · ${fmt(amt)}P`; btn.className = 'main'; btn.disabled = busy; }
+    else if (n === 0) { btn.textContent = '칸을 하나 열어 보세요'; btn.className = 'main'; btn.disabled = true; }
+    else { btn.textContent = `캐시아웃 · ${fmt(payOf(game.bet, game.mult100))}P`; btn.className = 'main cash'; btn.disabled = busy; }
+    $('rand').hidden = !playing;
+    $('rand').disabled = busy;
+    $('rescue').hidden = !(bal != null && bal < 10 && !playing);
+
+    $('stRounds').textContent = fmt(stats.rounds);
+    const pf = $('stProfit'); pf.textContent = signed(stats.profit); pf.className = stats.profit > 0 ? 'w' : stats.profit < 0 ? 'l' : '';
+    $('stBest').textContent = stats.best ? fmtMult(stats.best) : '—';
+
+    // 배율표 (표시용 계산)
+    const steps = [];
+    for (let i = 1; i <= N - k; i++) {
+      const cls = i <= n ? 'step done' : (playing && i === n + 1) ? 'step next' : 'step';
+      steps.push(`<div class="${cls}"><small>${i}개</small><b>${fmtMult(multFor(k, i))}</b></div>`);
+    }
+    $('lad').innerHTML = steps.join('');
+    const wrap = $('ladwrap'), target = $('lad').children[Math.max(0, n - 1)];
+    if (target) wrap.scrollLeft = Math.max(0, target.offsetLeft - wrap.clientWidth / 2 + target.offsetWidth / 2);
+
+    $('hist').innerHTML = history.length ? history.map(h =>
+      `<span class="chip ${h.m ? 'win' : 'lose'}">지뢰 ${h.k} · 보석 ${h.n}<b>${h.m ? fmtMult(h.m) : '펑'}</b></span>`).join('')
+      : '<span class="none">아직 한 판도 안 했어요</span>';
+  }
+
+  // 처음 열 때: 잔액(/api/me) + 진행 중인 판(/state)이 있으면 이어서
+  async function init() {
+    stats = store.get('mines.stats', { rounds: 0, profit: 0, best: 0 });
+    history = store.get('mines.hist', []);
+    busy = true; renderBoard(); update();
+    try {
+      const me = await api('/api/me');
+      bal = me.balance;
+      const s = await api('/api/solo/mines/state', {});
+      bal = s.balance;
+      if (s.session) {
+        const st = s.session.state;
+        game = { bet: s.session.stake, k: st.mines, revealed: st.revealed || [], board: null, hit: -1, mult100: st.mult100, next100: st.next100, payout: 0 };
+        phase = 'play';
+        $('mines').value = st.mines;
+        toast('진행 중인 판을 이어서 해요');
+      }
+    } catch (e) { toast(e.message, 'bust'); }
+    busy = false;
+    renderBoard(); update();
+  }
+  init();
+})();
+</script>
+
+<script>
+  // 뒤로 가기로 돌아왔을 때 다른 게임에서 바뀐 지갑을 다시 읽음
+  addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+</script>
+</body>
+</html>

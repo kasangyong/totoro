@@ -3,6 +3,9 @@
 import { createRng, shuffle, type Rng } from "../rng";
 
 export const MIN_BET = 10;
+/** [우리 규칙] 한 판 최대 베팅과 최대 배율 (10,000,000×) — 지급액이 Number 안전 범위(2^53)를 넘지 않게 */
+export const MAX_BET = 1_000_000;
+export const MAX_MULT100 = 1_000_000_000;
 
 /** 한 판(또는 한 세션)의 난수: 사용자 시드 쌍 + nonce. 규격은 rooms-arch 결정 4의 RNG v1 */
 export function soloRng(p: { serverSeed: string; clientSeed: string; userId: string; nonce: number }): Rng {
@@ -14,7 +17,7 @@ export function soloRng(p: { serverSeed: string; clientSeed: string; userId: str
   });
 }
 
-export const payoutOf = (bet: number, mult100: number) => Math.floor((bet * mult100) / 100);
+export const payoutOf = (bet: number, mult100: number) => Math.floor((bet * Math.min(mult100, MAX_MULT100)) / 100);
 
 const TWO_32 = 2 ** 32;
 /** Crash·Limbo 공통 분포: floor(99 / (1 − u)) / 100, u = x / 2^32, 1.00× ~ 1,000,000× */
@@ -32,6 +35,7 @@ export function playDice(rng: Rng, bet: number, p: DiceParams) {
   const chance = p.mode === "under" ? p.target : 100 - p.target;
   const win = p.mode === "under" ? roll < p.target * 100 : roll > p.target * 100;
   const mult100 = Math.floor(9900 / chance);
+  // 지급은 99/확률을 바로 곱한 값 (배율 표시는 소수 둘째 자리 내림이라 1P 안팎 차이가 날 수 있다)
   return { roll, win, mult100: win ? mult100 : 0, payout: win ? Math.floor((bet * 99) / chance) : 0 };
 }
 
@@ -158,4 +162,7 @@ export type Fraction = { num: string; den: string };
 export function hiloStep(acc: Fraction, odds: number): Fraction {
   return { num: String(BigInt(acc.num) * 99n * 13n), den: String(BigInt(acc.den) * 100n * BigInt(odds)) };
 }
-export const fractionMult100 = (f: Fraction) => Number((BigInt(f.num) * 100n) / BigInt(f.den));
+export const fractionMult100 = (f: Fraction) => {
+  const v = (BigInt(f.num) * 100n) / BigInt(f.den);
+  return v > BigInt(MAX_MULT100) ? MAX_MULT100 : Number(v);
+};

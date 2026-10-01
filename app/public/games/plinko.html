@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Plinko · 배팅 할래 말래</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: 핀 판(캔버스)이 주인공, 오른쪽에 베팅 패널, 아래에 기록·규칙 (Crash·Mines 데모와 같은 톤) */
+:root{
+  --bg:#0e1322; --panel:#161d31; --raise:#1f2842; --line:#2b3654;
+  --fg:#e9edf7; --muted:#8a95b2;
+  --accent:#ffb23f; --accent-ink:#241600; --hot:#ff8a3d;
+  --win:#3fd49b; --win-ink:#04210f; --bust:#ff5a5f; --ball:#ffe3a3;
+  --display:"Oswald","IBM Plex Sans KR",system-ui,sans-serif;
+  --body:"IBM Plex Sans KR",system-ui,-apple-system,"Malgun Gothic",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.5}
+.app{max-width:1120px;margin:0 auto;padding-inline:16px;padding-block:16px 48px;display:flex;flex-direction:column;gap:16px}
+
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.12em}
+.brand span{font-family:var(--body);font-weight:500;font-size:12px;letter-spacing:.04em;color:var(--muted);margin-left:8px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;vertical-align:middle}
+.topright{display:flex;align-items:center;gap:10px}
+.wallet{display:flex;align-items:baseline;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 14px}
+.wallet .lbl{color:var(--muted);font-size:12px}
+.wallet b{font-family:var(--display);font-size:20px;font-variant-numeric:tabular-nums;color:var(--accent)}
+.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+.ghost:hover{color:var(--fg)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"stage panel" "hist rules";gap:16px;align-items:start}
+@media (max-width:820px){.grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"stage" "panel" "hist" "rules"}}
+
+.stage{grid-area:stage;position:relative;aspect-ratio:10/9;max-width:100%;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  background:radial-gradient(110% 80% at 50% 0%,#1b2440 0%,var(--bg) 75%)}
+@media (max-width:520px){.stage{aspect-ratio:1/1.05}}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.last{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:4px;pointer-events:none}
+.toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-weight:500;white-space:nowrap;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.toast.win{border-color:var(--win);color:var(--win)}
+.toast.bust{border-color:var(--bust);color:var(--bust)}
+
+.panel{grid-area:panel;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.panel label,.lbl2{font-size:12px;color:var(--muted);letter-spacing:.03em}
+.field{display:flex;flex-direction:column;gap:6px}
+input[type=number]{width:100%;min-width:0;background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:10px 12px;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+.amtrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px}
+.q{background:var(--raise);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:0 10px;font-family:var(--display);font-size:14px;cursor:pointer}
+.q:hover:not(:disabled){border-color:var(--muted)}
+.q:disabled{opacity:.5;cursor:not-allowed}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.seg .q{padding:8px 0;font-family:var(--body);font-weight:500}
+.seg .q.on{border-color:var(--accent);color:var(--accent)}
+.main{border:0;border-radius:10px;padding:16px 12px;font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.02em;cursor:pointer;background:var(--accent);color:var(--accent-ink);font-variant-numeric:tabular-nums}
+.main:active{transform:translateY(1px)}
+.second{background:transparent;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:10px;font:inherit;font-weight:500;cursor:pointer;font-variant-numeric:tabular-nums}
+.second:hover{border-color:var(--muted)}
+.second.on{border-color:var(--win);color:var(--win)}
+.hint{margin:-4px 0 0;color:var(--muted);font-size:12px;text-align:center}
+.rescue{background:transparent;border:1px dashed var(--accent);color:var(--accent);border-radius:10px;padding:10px;font:inherit;font-weight:500;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.facts{margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;background:var(--raise);border-radius:10px;padding:10px 12px}
+.facts div{display:flex;flex-direction:column}
+.facts dt{font-size:11px;color:var(--muted)}
+.facts dd{margin:0;font-family:var(--display);font-size:15px;font-variant-numeric:tabular-nums}
+.stats{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.stats div{display:flex;flex-direction:column;gap:2px}
+.stats dt{font-size:11px;color:var(--muted)}
+.stats dd{margin:0;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+
+h2{margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.hist{grid-area:hist;min-width:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:var(--display);font-weight:500;font-size:13px;font-variant-numeric:tabular-nums;padding:3px 10px;border-radius:999px;background:var(--raise);color:var(--muted);border:1px solid var(--line)}
+.chip.c1{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.chip.c2{color:var(--hot);border-color:color-mix(in srgb,var(--hot) 45%,var(--line))}
+.chip.c3{color:var(--bust);border-color:color-mix(in srgb,var(--bust) 50%,var(--line))}
+.none{color:var(--muted);font-size:13px}
+
+.rules{grid-area:rules;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.rules ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.rules p{margin:10px 0 0;color:var(--muted);font-size:12px}
+.w{color:var(--win)} .l{color:var(--bust)}
+</style>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <a class="back" href="/">‹ 로비</a>
+    <div class="brand">PLINKO<span>배팅 할래 말래</span></div>
+    <div class="topright">
+      <button id="snd" class="ghost" type="button">소리 켜짐</button>
+      <div class="wallet"><span class="lbl">보유</span><b id="bal">—</b><span>P</span></div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="stage" id="stage">
+      <canvas id="cv"></canvas>
+      <div class="toast" id="toast" hidden></div>
+    </section>
+
+    <aside class="panel">
+      <div class="field">
+        <label for="amt">공 하나당 베팅 (P)</label>
+        <div class="amtrow">
+          <input id="amt" type="number" min="10" step="10" value="100" inputmode="numeric">
+          <button class="q amtq" type="button" data-q="half">½</button>
+          <button class="q amtq" type="button" data-q="double">×2</button>
+          <button class="q amtq" type="button" data-q="max">최대</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl2" id="riskL">위험도</span>
+        <div class="seg" role="group" aria-labelledby="riskL">
+          <button class="q rk" type="button" data-r="low">낮음</button>
+          <button class="q rk" type="button" data-r="med">보통</button>
+          <button class="q rk" type="button" data-r="high">높음</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl2" id="rowsL">핀 줄 수</span>
+        <div class="seg" role="group" aria-labelledby="rowsL">
+          <button class="q rw" type="button" data-n="8">8줄</button>
+          <button class="q rw" type="button" data-n="12">12줄</button>
+          <button class="q rw" type="button" data-n="16">16줄</button>
+        </div>
+      </div>
+      <dl class="facts">
+        <div><dt>최대 배율</dt><dd id="fMax">—</dd></div>
+        <div><dt>최대 배율 확률</dt><dd id="fProb">—</dd></div>
+      </dl>
+      <button id="main" class="main" type="button">공 떨어뜨리기</button>
+      <p class="hint">스페이스바로도 떨어뜨릴 수 있어요 · 여러 개 연달아 가능</p>
+      <button id="auto" class="second" type="button">자동으로 10개 떨어뜨리기</button>
+      <dl class="stats">
+        <div><dt>떨어뜨린 공</dt><dd id="stRounds">0</dd></div>
+        <div><dt>총 수익</dt><dd id="stProfit">0</dd></div>
+        <div><dt>최고 배율</dt><dd id="stBest">—</dd></div>
+      </dl>
+    </aside>
+
+    <section class="hist">
+      <h2>최근 결과</h2>
+      <div class="chips" id="hist"></div>
+    </section>
+
+    <section class="rules">
+      <h2>규칙</h2>
+      <ol>
+        <li>공 하나마다 정한 금액을 걸고 떨어뜨려요.</li>
+        <li>공은 핀에 부딪힐 때마다 왼쪽이나 오른쪽으로 반반 확률로 튕겨요.</li>
+        <li>맨 아래 칸에 적힌 배율만큼 받아요. 1보다 작은 칸은 일부만 돌려받아요.</li>
+        <li>위험도가 높을수록 가운데는 더 작고 양 끝은 더 커요.</li>
+        <li>줄이 많을수록 끝 칸에 가기 어렵지만 배율이 커요.</li>
+      </ol>
+      <p id="rtpNote">공은 대부분 가운데로 모여요. 양 끝 칸은 16줄 기준 6만 5천 번에 한 번꼴이에요. 실제 돈은 쓰지 않아요.</p>
+      <p>결과는 서버가 정해요 · 시드 확인은 로비의 공정성 페이지</p>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/riffwave.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsfxr@1.4.1/sfxr.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const fmt = n => Math.floor(n).toLocaleString('ko-KR');
+  const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
+  const fmtMult = m => (m >= 100 ? String(Math.round(m)) : String(m)) + '×';
+
+  // 줄 수 → 위험도 → 칸별 배율 (왼쪽 끝부터)
+  const TABLES = {
+    8:  { low: [5.6, 2.1, 1.1, 1, 0.5, 1, 1.1, 2.1, 5.6],
+          med: [13, 3, 1.3, 0.7, 0.4, 0.7, 1.3, 3, 13],
+          high: [29, 4, 1.5, 0.3, 0.2, 0.3, 1.5, 4, 29] },
+    12: { low: [10, 3, 1.6, 1.4, 1.1, 1, 0.5, 1, 1.1, 1.4, 1.6, 3, 10],
+          med: [33, 11, 4, 2, 1.1, 0.6, 0.3, 0.6, 1.1, 2, 4, 11, 33],
+          high: [170, 24, 8.1, 2, 0.7, 0.2, 0.2, 0.2, 0.7, 2, 8.1, 24, 170] },
+    16: { low: [16, 9, 2, 1.4, 1.4, 1.2, 1.1, 1, 0.5, 1, 1.1, 1.2, 1.4, 1.4, 2, 9, 16],
+          med: [110, 41, 10, 5, 3, 1.5, 1, 0.5, 0.3, 0.5, 1, 1.5, 3, 5, 10, 41, 110],
+          high: [1000, 130, 26, 9, 4, 2, 0.2, 0.2, 0.2, 0.2, 0.2, 2, 4, 9, 26, 130, 1000] }
+  };
+  const binom = (n, k) => { let r = 1; for (let i = 1; i <= k; i++) r = r * (n - k + i) / i; return r; };
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+  // 잔액은 서버 값만 씀. bal = 화면 표시용 (걸자마자 빼 두고, 공이 떨어지면 서버 잔액으로 맞춤)
+  let bal = 0, ready = false, stats, history;
+  let rows = 12, risk = 'med';
+  let balls = [], autoLeft = 0, lastAuto = 0;
+  let seq = 0, unsettled = [];   // 아직 착지 안 한 공 (요청 중 + 떨어지는 중) { seq, bet }
+  const pegFlash = new Map(), slotHit = new Map();
+  function save() { store.set('plinko.stats', stats); store.set('plinko.hist', history); }
+
+  // ---------- 서버 ----------
+  async function api(path, body) {
+    const opt = body === undefined ? { credentials: 'same-origin' }
+      : { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    const res = await fetch(path, opt);
+    if (res.status === 401) { location.href = '/login'; const e = new Error('로그인이 필요해요'); e.silent = true; throw e; }
+    let j = null; try { j = await res.json(); } catch (e) {}
+    if (!res.ok || !j || !j.ok) throw new Error((j && j.error) || '서버 오류가 났어요');
+    return j.data;
+  }
+  const fail = e => { if (!e.silent) toast(e.message || '서버 오류가 났어요', 'bust'); };
+  // 모든 공이 정산되면 서버 잔액으로 한 번 더 맞춤 (요청이 순서 바뀌어 처리됐을 때 대비)
+  function reconcile() {
+    if (unsettled.length) return;
+    api('/api/me').then(me => { if (!unsettled.length && typeof me?.balance === 'number') { bal = me.balance; updateUI(); } }).catch(() => {});
+  }
+  function saveCfg() { store.set('plinko.cfg', { rows, risk }); }
+
+  // ---------- 소리 ----------
+  let actx = null, soundOn = true;
+  function unlockAudio() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (actx && actx.state === 'suspended') actx.resume();
+  }
+  function tone(f, d, type = 'sine', vol = .12, delay = 0, f2) {
+    if (!actx || !soundOn) return;
+    const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + d + .02);
+  }
+  $('snd').addEventListener('click', () => { unlockAudio(); soundOn = !soundOn; $('snd').textContent = soundOn ? '소리 켜짐' : '소리 꺼짐'; });
+
+  // ---------- jsfxr 효과음 · canvas-confetti 폭죽 (CDN을 못 불러오면 위의 tone()으로 대신함) ----------
+  const SFX = (() => {
+    const lib = window.jsfxr && window.jsfxr.sfxr, defs = {}, bufs = {};
+    const make = (name, algo, tweak) => {
+      if (!lib) return;
+      try { const p = lib.generate(algo); if (tweak) tweak(p); defs[name] = p; } catch (e) {}
+    };
+    make('bet', 'blipSelect');
+    make('coin', 'pickupCoin');
+    make('big', 'powerUp');
+    make('boom', 'explosion');
+    make('hit', 'hitHurt');
+    make('tick', 'blipSelect', p => { p.p_env_sustain = 0.02; p.p_env_decay = 0.05; });
+    return {
+      play(name, vol = 1, rate = 1) {
+        if (!lib || !actx || !soundOn || !defs[name]) return false;
+        try {
+          if (!bufs[name]) bufs[name] = lib.toWebAudio(defs[name], actx).buffer;
+          const src = actx.createBufferSource(), g = actx.createGain();
+          src.buffer = bufs[name]; src.playbackRate.value = rate; g.gain.value = vol;
+          src.connect(g).connect(actx.destination); src.start();
+          return true;
+        } catch (e) { return false; }
+      }
+    };
+  })();
+  const CONFETTI_COLORS = ['#ffb23f', '#3fd49b', '#ff5a5f', '#e9edf7', '#ffe3a3'];
+  // level 0: 작은 폭죽, 1: 큰 폭죽, 2: 양옆에서 한 번 더
+  function burst(level, el) {
+    if (level < 0 || !window.confetti || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = (el || document.body).getBoundingClientRect();
+    const origin = { x: (r.left + r.width / 2) / innerWidth, y: Math.max(0.1, Math.min(0.9, (r.top + r.height * 0.55) / innerHeight)) };
+    const colors = CONFETTI_COLORS;
+    confetti({ particleCount: 30 + level * 50, spread: 55 + level * 25, startVelocity: 30 + level * 12, origin, colors, disableForReducedMotion: true });
+    if (level >= 2) {
+      confetti({ particleCount: 80, angle: 60, spread: 60, origin: { x: 0, y: 0.8 }, colors, disableForReducedMotion: true });
+      confetti({ particleCount: 80, angle: 120, spread: 60, origin: { x: 1, y: 0.8 }, colors, disableForReducedMotion: true });
+    }
+  }
+  const burstLevel = m => m >= 100 ? 2 : m >= 10 ? 1 : m >= 2 ? 0 : -1;
+
+  let toastTimer = 0;
+  function toast(msg, kind = '') {
+    const el = $('toast'); el.textContent = msg; el.className = 'toast ' + kind; el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2400);
+  }
+
+  // ---------- 공 (경로·칸·지급은 서버가 정함) ----------
+  const segMs = () => 1700 / (rows + 1);
+
+  function drop() {
+    unlockAudio();
+    if (!ready) return false;
+    const a = Math.floor(Number($('amt').value));
+    if (!(a >= 10)) { toast('10P 이상부터 걸 수 있어요', 'bust'); return false; }
+    if (a > bal) { toast(`보유 포인트(${fmt(bal)}P)가 모자라요`, 'bust'); return false; }
+    bal -= a;
+    const s = ++seq, u = { seq: s, bet: a };
+    unsettled.push(u);
+    const r0 = rows, k0 = risk;
+    api('/api/solo/plinko/play', { bet: a, params: { rows: r0, risk: k0 } }).then(d => {
+      const res = d.result, k = [0];
+      for (let r = 0; r < r0; r++) k.push(k[r] + res.path[r]);
+      balls.push({ seq: s, bet: a, k, slot: res.slot, mult100: res.mult100, payout: res.payout, balance: d.balance,
+        t0: performance.now(), lastSeg: 0, jitter: (Math.random() - .5) * .3 });
+    }).catch(e => {
+      unsettled = unsettled.filter(x => x !== u);
+      bal += a; autoLeft = 0; fail(e); updateUI(); reconcile();
+    });
+    updateUI();
+    return true;
+  }
+
+  function land(b, now) {
+    const m = b.mult100 / 100, win = b.payout;
+    unsettled = unsettled.filter(x => x.seq !== b.seq);
+    // 서버 잔액(이 공까지 정산) − 이 공 뒤에 건 아직 안 떨어진 공들의 베팅
+    bal = b.balance - unsettled.reduce((s, x) => s + (x.seq > b.seq ? x.bet : 0), 0);
+    stats.rounds++; stats.profit += win - b.bet; stats.best = Math.max(stats.best || 0, m);
+    history.unshift(m); history = history.slice(0, 30);
+    slotHit.set(b.slot, now);
+    save();
+    if (m >= 10) {
+      toast(`${fmtMult(m)}! ${fmt(win)}P 받음`, 'win');
+      if (!SFX.play('big')) { tone(660, .12, 'triangle'); tone(990, .12, 'triangle', .12, .09); tone(1320, .25, 'triangle', .12, .18); }
+      burst(m >= 100 ? 2 : 1, $('stage'));
+    }
+    else if (m >= 1) SFX.play('coin', .35) || tone(520 + m * 40, .12, 'triangle', .08);
+    else tone(200, .12, 'sine', .06);
+    updateUI(); reconcile();
+  }
+
+  // ---------- 입력 ----------
+  $('main').addEventListener('click', drop);
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && document.activeElement?.tagName !== 'BUTTON') { e.preventDefault(); drop(); }
+  });
+  $('auto').addEventListener('click', () => {
+    unlockAudio();
+    autoLeft = autoLeft ? 0 : 10; lastAuto = 0; updateUI();
+  });
+  document.querySelectorAll('.amtq').forEach(btn => btn.addEventListener('click', () => {
+    const inp = $('amt'), v = Math.floor(Number(inp.value) || 0), q = btn.dataset.q;
+    const nv = q === 'half' ? Math.floor(v / 2) : q === 'double' ? v * 2 : bal;
+    inp.value = Math.max(10, Math.min(Math.floor(bal), nv) || 10);
+    updateUI();
+  }));
+  $('amt').addEventListener('input', updateUI);
+  document.querySelectorAll('.rk').forEach(b => b.addEventListener('click', () => { if (busy()) return; risk = b.dataset.r; saveCfg(); updateUI(); }));
+  document.querySelectorAll('.rw').forEach(b => b.addEventListener('click', () => { if (busy()) return; rows = Number(b.dataset.n); saveCfg(); updateUI(); }));
+  const busy = () => balls.length > 0 || autoLeft > 0 || unsettled.length > 0;
+
+  // ---------- 그리기 ----------
+  const cv = $('cv'), ctx = cv.getContext('2d');
+  const css = getComputedStyle(document.documentElement);
+  const C = k => css.getPropertyValue(k).trim();
+  const col = { line: C('--line'), raise: C('--raise'), fg: C('--fg'), muted: C('--muted'), accent: C('--accent'), hot: C('--hot'), bust: C('--bust'), ball: C('--ball') };
+  const slotTier = m => m >= 10 ? 3 : m >= 3 ? 2 : m >= 1 ? 1 : 0;
+  const tierFill = [col.raise, col.accent, col.hot, col.bust];
+
+  function geo(w, h) {
+    const s = Math.min((w - 24) / (rows + 2), (h - 28) / (rows * 0.86 + 2.2));
+    const vs = s * 0.86, cx = w / 2;
+    const top = Math.max(14, (h - (rows * vs + s * 2.2)) / 2 + s * 0.4);
+    return {
+      s, vs, cx,
+      pegR: Math.max(2, s * 0.09), ballR: Math.max(3.5, s * 0.2),
+      pegY: r => top + s * 0.4 + r * vs,
+      pegX: (r, j) => cx + (j - (r + 2) / 2) * s,
+      slotY: top + s * 0.4 + (rows - 1) * vs + vs * 0.75,
+      slotH: s * 0.78, startY: top - s * 0.2
+    };
+  }
+
+  function ballPos(b, G, e) {
+    const seg = Math.floor(e), u = e - seg;
+    const pt = i => {
+      if (i === 0) return [G.cx + b.jitter * G.s * 0.2, G.startY];
+      if (i <= rows) { const r = i - 1; return [G.cx + (b.k[r] - r / 2) * G.s, G.pegY(r) - G.pegR - G.ballR]; }
+      return [G.cx + (b.slot - rows / 2) * G.s, G.slotY + G.slotH * 0.35];
+    };
+    const [x0, y0] = pt(seg), [x1, y1] = pt(seg + 1);
+    if (seg === 0) return [x0 + (x1 - x0) * u, y0 + (y1 - y0) * u * u];
+    const hop = G.vs * 0.32;
+    return [x0 + (x1 - x0) * u, y0 + (y1 - y0) * u * u - hop * 4 * u * (1 - u) * (1 - u)];
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  function frame(now) {
+    const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    const W = Math.round(r.width * d), H = Math.round(r.height * d);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    const w = r.width, h = r.height, G = geo(w, h);
+    ctx.clearRect(0, 0, w, h);
+
+    // 자동 떨어뜨리기
+    if (autoLeft > 0 && now - lastAuto >= 230) {
+      lastAuto = now;
+      if (drop()) autoLeft--; else autoLeft = 0;
+      updateUI();
+    }
+
+    // 공 진행 · 핀 충돌 · 착지
+    const SEG = segMs();
+    balls = balls.filter(b => {
+      const e = (now - b.t0) / SEG;
+      const seg = Math.floor(e);
+      while (b.lastSeg < Math.min(seg, rows + 1)) {
+        b.lastSeg++;
+        const rr = b.lastSeg - 1;
+        if (b.lastSeg <= rows) { pegFlash.set(rr + ',' + (b.k[rr] + 1), now); SFX.play('tick', .18, 1.3 + Math.random() * .6) || tone(1100 + Math.random() * 500, .025, 'square', .015); }
+      }
+      if (e >= rows + 1) { land(b, now); return false; }
+      return true;
+    });
+
+    // 핀
+    for (let rr = 0; rr < rows; rr++) {
+      for (let j = 0; j < rr + 3; j++) {
+        const f = pegFlash.get(rr + ',' + j), age = f ? now - f : 1e9;
+        const glow = Math.max(0, 1 - age / 260);
+        const x = G.pegX(rr, j), y = G.pegY(rr);
+        if (glow > 0) { ctx.beginPath(); ctx.arc(x, y, G.pegR * (2 + glow * 2), 0, Math.PI * 2); ctx.fillStyle = col.ball + '40'; ctx.fill(); }
+        ctx.beginPath(); ctx.arc(x, y, G.pegR * (1 + glow * .4), 0, Math.PI * 2);
+        ctx.fillStyle = glow > 0 ? col.ball : col.muted; ctx.fill();
+      }
+    }
+
+    // 칸
+    const T = TABLES[rows][risk];
+    const fs = Math.max(8, Math.min(14, G.s * 0.3));
+    ctx.font = `700 ${fs}px "Oswald", system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    T.forEach((m, i) => {
+      const hit = slotHit.get(i), age = hit ? now - hit : 1e9;
+      const press = age < 220 ? Math.sin(age / 220 * Math.PI) * G.slotH * 0.22 : 0;
+      const x = G.cx + (i - rows / 2) * G.s, sw = G.s * 0.9, tier = slotTier(m);
+      roundRect(x - sw / 2, G.slotY + press, sw, G.slotH, Math.min(6, sw * 0.18));
+      ctx.fillStyle = tierFill[tier]; ctx.fill();
+      if (age < 400) { ctx.strokeStyle = col.fg; ctx.globalAlpha = 1 - age / 400; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1; }
+      ctx.fillStyle = tier ? '#1d0d04' : col.fg;
+      ctx.fillText(m >= 100 ? String(Math.round(m)) : String(m), x, G.slotY + press + G.slotH / 2 + 1);
+    });
+
+    // 공
+    balls.forEach(b => {
+      const [x, y] = ballPos(b, G, (now - b.t0) / SEG);
+      ctx.beginPath(); ctx.arc(x, y, G.ballR * 2, 0, Math.PI * 2); ctx.fillStyle = col.ball + '26'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, G.ballR, 0, Math.PI * 2); ctx.fillStyle = col.ball; ctx.fill();
+    });
+
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- 화면 갱신 ----------
+  function updateUI() {
+    $('bal').textContent = ready ? fmt(bal) : '—';
+    const amt = Math.floor(Number($('amt').value) || 0);
+    $('main').textContent = `공 떨어뜨리기 · ${fmt(amt)}P`;
+    const a = $('auto');
+    a.textContent = autoLeft ? `자동 멈추기 (남은 공 ${autoLeft}개)` : `자동으로 10개 떨어뜨리기 · ${fmt(amt * 10)}P`;
+    a.classList.toggle('on', autoLeft > 0);
+    const lock = busy();
+    document.querySelectorAll('.rk').forEach(b => { b.classList.toggle('on', b.dataset.r === risk); b.disabled = lock; });
+    document.querySelectorAll('.rw').forEach(b => { b.classList.toggle('on', Number(b.dataset.n) === rows); b.disabled = lock; });
+
+    const T = TABLES[rows][risk], mx = Math.max(...T);
+    $('fMax').textContent = fmtMult(mx);
+    const p = 2 / 2 ** rows;
+    $('fProb').textContent = `${fmt(1 / p)}번에 1번`;
+    const rtp = T.reduce((s, m, i) => s + m * binom(rows, i) / 2 ** rows, 0);
+    $('rtpNote').textContent = `지금 설정(${rows}줄 · 위험도 ${{ low: '낮음', med: '보통', high: '높음' }[risk]})의 기대 환급률은 ${(rtp * 100).toFixed(1)}%예요. 공은 대부분 가운데로 모이고, 양 끝 칸은 ${fmt(1 / p)}번에 한 번꼴이에요. 실제 돈은 쓰지 않아요.`;
+
+    $('stRounds').textContent = fmt(stats.rounds);
+    const pf = $('stProfit'); pf.textContent = signed(stats.profit); pf.className = stats.profit > 0 ? 'w' : stats.profit < 0 ? 'l' : '';
+    $('stBest').textContent = stats.best ? fmtMult(stats.best) : '—';
+    $('hist').innerHTML = history.length
+      ? history.map(m => `<span class="chip ${['', 'c1', 'c2', 'c3'][slotTier(m)]}">${fmtMult(m)}</span>`).join('')
+      : '<span class="none">아직 공을 안 떨어뜨렸어요</span>';
+  }
+
+  function start() {
+    stats = store.get('plinko.stats', { rounds: 0, profit: 0, best: 0 });
+    history = store.get('plinko.hist', []);
+    const cfg = store.get('plinko.cfg', null);
+    if (cfg && TABLES[cfg.rows] && TABLES[cfg.rows][cfg.risk]) { rows = cfg.rows; risk = cfg.risk; }
+    updateUI();
+    requestAnimationFrame(frame);
+    api('/api/me').then(me => { bal = me.balance; ready = true; updateUI(); }).catch(fail);
+  }
+  start();
+})();
+</script>
+
+<script>
+  // 뒤로 가기로 돌아왔을 때 다른 게임에서 바뀐 지갑을 다시 읽음
+  addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+</script>
+</body>
+</html>
