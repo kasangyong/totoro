@@ -7,7 +7,7 @@
   ```sql
   update private.settings set value = '"새-초대코드"' where key = 'invite_code';
   ```
-- [ ] `/api/signup`에 IP 기준 rate limit (admin `createUser`는 GoTrue rate limit을 받지 않음 → 초대코드만 알면 계정·보너스 대량 생성 가능)
+- [x] `/api/signup`에 IP 기준 rate limit — 완료 (IP당 1시간 5번, 마이그레이션 0008 `signup_rate_ok`)
 - [ ] `engine_rw` 비밀번호 설정 (저장소에 없음)
   ```sql
   alter role engine_rw password '<긴 무작위 값>';

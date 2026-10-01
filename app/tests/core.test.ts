@@ -121,3 +121,13 @@ describe("daily claims", () => {
     expect((await anon().rpc("claim_attendance")).error).not.toBeNull();
   });
 });
+
+describe("signup rate limit", () => {
+  it("allows 5 attempts per IP per hour, then refuses", async () => {
+    const ip = `test-${Date.now()}`;
+    const results: boolean[] = [];
+    for (let i = 0; i < 6; i++) results.push((await admin().rpc("signup_rate_ok", { p_ip: ip })).data);
+    expect(results).toEqual([true, true, true, true, true, false]);
+    expect((await anon().rpc("signup_rate_ok", { p_ip: ip })).error).not.toBeNull();
+  });
+});

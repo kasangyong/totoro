@@ -19,6 +19,12 @@ export async function POST(request: Request) {
   if (typeof inviteCode !== "string") return fail("초대코드를 입력해 주세요.", 400);
 
   const admin = supabaseAdmin();
+  // IP당 1시간 5번 (초대코드 맞히기·계정 대량 생성 방지). Vercel은 x-forwarded-for 첫 값이 실제 접속 IP.
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const { data: allowed, error: rateError } = await admin.rpc("signup_rate_ok", { p_ip: ip });
+  if (rateError) return fail("잠시 후 다시 시도해 주세요.", 500);
+  if (!allowed) return fail("가입 시도가 너무 많아요. 1시간 뒤에 다시 해 주세요.", 429);
+
   const { data: ok, error: inviteError } = await admin.rpc("verify_invite_code", { p_code: inviteCode });
   if (inviteError) return fail("초대코드를 확인하지 못했어요.", 500);
   if (!ok) return fail("초대코드가 맞지 않아요.", 403);
