@@ -53,13 +53,13 @@ export default async function Lobby() {
           </div>
           <p className="mt-2 text-sm text-muted">방을 만들어 2~6명이 함께. 판마다 섞은 순서를 검증할 수 있어요.</p>
         </Link>
-        <div className="panel p-5 opacity-60">
+        <Link href="/rooms" className="panel block p-5 transition hover:-translate-y-0.5">
           <div className="flex items-baseline justify-between">
             <span className="font-display text-2xl tracking-widest">POKER</span>
-            <span className="text-sm text-muted">7포커 · 준비 중</span>
+            <span className="text-sm text-muted">7포커</span>
           </div>
-          <p className="mt-2 text-sm text-muted">초이스 룰 세븐포커.</p>
-        </div>
+          <p className="mt-2 text-sm text-muted">초이스 룰 세븐포커. 4장 받아 1장 버리고 1장 공개, 히든까지.</p>
+        </Link>
       </div>
 
       <h2 className="mt-8 mb-3 text-sm font-bold tracking-widest text-accent">혼자 하는 게임 · 서버 연결 준비 중</h2>

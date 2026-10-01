@@ -5,7 +5,8 @@ import { useState, type FormEvent } from "react";
 
 export function CreateRoomForm() {
   const router = useRouter();
-  const [name, setName] = useState("섯다 한 판");
+  const [game, setGame] = useState<"sutda" | "poker7">("sutda");
+  const [name, setName] = useState("한 판 하자");
   const [baseBet, setBaseBet] = useState(100);
   const [maxSeats, setMaxSeats] = useState(6);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +19,7 @@ export function CreateRoomForm() {
     const res = await fetch("/api/rooms", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, baseBet, maxSeats }),
+      body: JSON.stringify({ name, baseBet, maxSeats, game }),
     });
     const body: { data?: { id: string }; error?: string } = await res.json().catch(() => ({}));
     setBusy(false);
@@ -27,7 +28,14 @@ export function CreateRoomForm() {
   }
 
   return (
-    <form onSubmit={submit} className="panel mt-6 grid gap-3 p-5 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
+    <form onSubmit={submit} className="panel mt-6 grid gap-3 p-5 sm:grid-cols-[auto_1fr_auto_auto_auto] sm:items-end">
+      <label className="flex flex-col gap-1 text-sm">
+        게임
+        <select className="field" value={game} onChange={(e) => setGame(e.target.value as "sutda" | "poker7")}>
+          <option value="sutda">섯다</option>
+          <option value="poker7">7포커</option>
+        </select>
+      </label>
       <label className="flex flex-col gap-1 text-sm">
         방 이름
         <input className="field" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} required />
@@ -58,7 +66,7 @@ export function CreateRoomForm() {
         방 만들기
       </button>
       {error && (
-        <p role="alert" className="text-sm text-bust sm:col-span-4">
+        <p role="alert" className="text-sm text-bust sm:col-span-5">
           {error}
         </p>
       )}

@@ -6,6 +6,7 @@ import type { BetActionType } from "@/lib/engine/betting";
 import type { RoomView } from "@/lib/rooms/service";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { HwatuCard } from "./hwatu-card";
+import { PlayingCard } from "./playing-card";
 
 const ACTION_LABEL: Record<BetActionType, string> = {
   check: "체크",
@@ -43,6 +44,12 @@ export function RoomTable({ roomId }: { roomId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [buyIn, setBuyIn] = useState<number | null>(null);
+  /** 7포커 초이스: 먼저 누른 카드 = 버릴 카드, 다음 카드 = 공개할 카드 */
+  const [pickState, setPickState] = useState<{ handId: string | null; discard: number | null; open: number | null }>({
+    handId: null,
+    discard: null,
+    open: null,
+  });
   /** 서버 시각 기준 현재 시간 (250ms마다 갱신) */
   const [now, setNow] = useState(() => Date.now());
   const offset = useRef(0);
@@ -132,11 +139,28 @@ export function RoomTable({ roomId }: { roomId: string }) {
   const remaining = view.deadline ? Math.max(0, new Date(view.deadline).getTime() - now) : null;
   // 단계별 제한 시간 (lib/rooms/service.ts의 SEED_MS·TURN_MS·REJOIN_MS·BETWEEN_MS와 같게)
   const totalMs =
-    view.phase === "seeding" || view.phase === "between" ? 5000 : view.game?.phase === "rejoin" ? 10000 : 20000;
+    view.phase === "seeding" || view.phase === "between"
+      ? 5000
+      : view.game?.phase === "rejoin"
+        ? 10000
+        : view.game?.phase === "choice"
+          ? 15000
+          : 20000;
   const isHost = view.room.hostId === me;
-  const pot = game ? game.seats.reduce((a, s) => a + s.handContrib, 0) + game.carried.reduce((a, p) => a + p.amount, 0) : 0;
+  const poker = game?.game === "poker7" ? game : null;
+  const sutda = game?.game === "sutda" ? game : null;
+  const Card = view.room.game === "poker7" ? PlayingCard : HwatuCard;
+  const pot = game
+    ? game.seats.reduce((a, s) => a + s.handContrib, 0) + (sutda ? sutda.carried.reduce((a, p) => a + p.amount, 0) : 0)
+    : 0;
+  const bossId = sutda ? sutda.bossId : poker && poker.phase !== "choice" ? poker.round.bossId : null;
+  const choosing = poker?.phase === "choice" && poker.seats.some((s) => s.id === me) && !poker.chosen.includes(me);
+  // 선택은 판마다 새로 (다른 판에서 누른 카드가 남지 않게)
+  const pick = pickState.handId === view.handId ? pickState : { discard: null, open: null };
+  const setPick = (next: (p: { discard: number | null; open: number | null }) => { discard: number | null; open: number | null }) =>
+    setPickState({ handId: view.handId, ...next(pick) });
   const gameSeat = (id: string) => game?.seats.find((s) => s.id === id);
-  const rejoin = game?.phase === "rejoin" ? game.rejoin : null;
+  const rejoin = sutda?.phase === "rejoin" ? sutda.rejoin : null;
   const minBuyIn = view.room.baseBet * 10;
   const result = view.phase === "between" && game?.result ? game.result : null;
 
@@ -149,7 +173,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
         <div className="text-center">
           <h1 className="font-bold">{view.room.name}</h1>
           <p className="text-xs text-muted">
-            섯다 · 기본금 {view.room.baseBet.toLocaleString("ko-KR")}P · {view.handNo > 0 ? `${view.handNo}번째 판` : "첫 판 전"} ·{" "}
+            {view.room.game === "poker7" ? "7포커" : "섯다"} · 기본금 {view.room.baseBet.toLocaleString("ko-KR")}P · {view.handNo > 0 ? `${view.handNo}번째 판` : "첫 판 전"} ·{" "}
             {PHASE_LABEL[view.phase]}
           </p>
         </div>
@@ -160,8 +184,10 @@ export function RoomTable({ roomId }: { roomId: string }) {
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted">
             {view.phase === "seeding" && `모두의 시드를 모으는 중 (${view.seedsSubmitted.length}/${view.players.length})`}
-            {view.phase === "playing" && game?.phase === "rejoin" && "구사 재경기 · 죽은 사람 참여 결정 중"}
-            {view.phase === "playing" && game && game.phase !== "rejoin" && `${game.rematchNo > 0 ? `재경기 ${game.rematchNo} · ` : ""}${game.phase === "bet1" ? "1차 베팅" : "2차 베팅"}`}
+            {view.phase === "playing" && sutda?.phase === "rejoin" && "구사 재경기 · 죽은 사람 참여 결정 중"}
+            {view.phase === "playing" && sutda && sutda.phase !== "rejoin" && `${sutda.rematchNo > 0 ? `재경기 ${sutda.rematchNo} · ` : ""}${sutda.phase === "bet1" ? "1차 베팅" : "2차 베팅"}`}
+            {view.phase === "playing" && poker?.phase === "choice" && `초이스 · 버릴 카드와 공개할 카드를 고르는 중 (${poker.chosen.length}/${poker.seats.length})`}
+            {view.phase === "playing" && poker?.phase === "bet" && `${poker.street}구${poker.street === 7 ? " (히든)" : ""} 베팅`}
             {view.phase === "between" && "판이 끝났어요"}
             {view.phase === "idle" && "2명 이상 앉으면 방장이 시작할 수 있어요"}
           </p>
@@ -187,8 +213,9 @@ export function RoomTable({ roomId }: { roomId: string }) {
           {view.seats.map((s) => {
             const gs = gameSeat(s.userId);
             const cards = game?.cards.filter((c) => c.ownerId === s.userId) ?? [];
-            const turn = game?.round.toActId === s.userId && game.phase !== "done" && game.phase !== "rejoin";
-            const handLabel = result?.hands[s.userId]?.label;
+            const turn = game?.round.toActId === s.userId && game.phase !== "done" && game.phase !== "rejoin" && game.phase !== "choice";
+            const hand = result?.hands[s.userId];
+            const handLabel = hand ? ("label" in hand ? hand.label : hand.category) : undefined;
             const won = result && (result.payouts[s.userId] ?? 0) > 0;
             return (
               <li
@@ -203,7 +230,8 @@ export function RoomTable({ roomId }: { roomId: string }) {
                   <span className="font-display text-lg">{s.stack.toLocaleString("ko-KR")}</span>
                 </div>
                 <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
-                  {game?.bossId === s.userId && <Badge>보스</Badge>}
+                  {bossId === s.userId && <Badge>보스</Badge>}
+                  {poker?.phase === "choice" && poker.chosen.includes(s.userId) && <Badge>고름</Badge>}
                   {view.room.hostId === s.userId && <Badge>방장</Badge>}
                   {turn && <Badge tone="accent">차례</Badge>}
                   {gs?.folded && view.players.includes(s.userId) && <Badge>다이</Badge>}
@@ -213,7 +241,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
                 </div>
                 <div className="mt-2 flex min-h-14 gap-1.5">
                   {cards.map((c, i) => (
-                    <HwatuCard key={i} card={c.card} small />
+                    <Card key={i} card={c.card} small />
                   ))}
                 </div>
               </li>
@@ -221,13 +249,59 @@ export function RoomTable({ roomId }: { roomId: string }) {
           })}
         </ul>
 
-        {mySeat && game && view.phase === "playing" && (
-          <div className="flex justify-center gap-2">
+        {mySeat && game && view.phase === "playing" && !choosing && (
+          <div className="flex flex-wrap justify-center gap-2">
             {game.cards
               .filter((c) => c.ownerId === me)
               .map((c, i) => (
-                <HwatuCard key={i} card={c.card} />
+                <Card key={i} card={c.card} />
               ))}
+          </div>
+        )}
+
+        {choosing && poker && (
+          <div className="grid justify-items-center gap-3">
+            <p className="text-sm">
+              {pick.discard === null ? "버릴 카드를 누르세요" : pick.open === null ? "공개할 카드를 누르세요" : "이대로 할까요?"}
+            </p>
+            <div className="flex gap-2">
+              {poker.cards
+                .filter((c) => c.ownerId === me && c.card !== null)
+                .map((c) => (
+                  <button
+                    key={c.card}
+                    type="button"
+                    disabled={busy}
+                    aria-pressed={pick.discard === c.card || pick.open === c.card}
+                    onClick={() =>
+                      setPick((p) =>
+                        p.discard === null
+                          ? { discard: c.card, open: null }
+                          : p.open === null && p.discard !== c.card
+                            ? { ...p, open: c.card }
+                            : { discard: c.card, open: null },
+                      )
+                    }
+                  >
+                    <PlayingCard card={c.card} selected={pick.discard === c.card ? "버림" : pick.open === c.card ? "공개" : undefined} />
+                  </button>
+                ))}
+            </div>
+            <div className="flex gap-2">
+              <button className="btn-ghost px-4 py-2" onClick={() => setPick(() => ({ discard: null, open: null }))}>
+                다시 고르기
+              </button>
+              <button
+                className="btn-main px-6 py-2"
+                disabled={busy || pick.discard === null || pick.open === null}
+                onClick={async () => {
+                  await run("choose", { discard: pick.discard, open: pick.open });
+                  setPick(() => ({ discard: null, open: null }));
+                }}
+              >
+                확정
+              </button>
+            </div>
           </div>
         )}
       </section>
@@ -236,7 +310,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
         <section className="panel mt-4 p-4">
           <p className="font-bold text-accent">
             {view.seats.find((s) => s.userId === result.winnerId)?.username ?? "누군가"} 승리
-            {result.splitAfterMaxRematches && " · 재경기 3번 후 나눠 가짐"}
+            {"splitAfterMaxRematches" in result && result.splitAfterMaxRematches && " · 재경기 3번 후 나눠 가짐"}
           </p>
           <ul className="mt-2 text-sm text-muted">
             {Object.entries(result.payouts).map(([id, amt]) => (

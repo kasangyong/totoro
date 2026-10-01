@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import type { BetActionType } from "@/lib/engine/betting";
 import { handle, readJson, requireUser } from "@/lib/rooms/http";
-import { act, rejoin, RoomError, sit, stand, start, submitSeed, tick } from "@/lib/rooms/service";
+import { act, choose, rejoin, RoomError, sit, stand, start, submitSeed, tick } from "@/lib/rooms/service";
 
 const BET_ACTIONS: readonly BetActionType[] = ["check", "ping", "call", "ddadang", "quarter", "half", "die"];
 
@@ -26,6 +26,11 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/rooms/[
       }
       case "rejoin":
         return rejoin(userId, id, body.join === true);
+      case "choose": {
+        const { discard, open } = body;
+        if (!Number.isInteger(discard) || !Number.isInteger(open)) throw new RoomError("카드를 골라 주세요.");
+        return choose(userId, id, discard as number, open as number);
+      }
       case "tick":
         return tick(id);
       default:

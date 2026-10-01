@@ -3,17 +3,21 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { replay } from "@/lib/engine/replay";
 import { autoClientSeed, commitOf, type SeedEntry } from "@/lib/engine/rng";
+import { createPoker7Hand, poker7Deck, reducePoker7, type Poker7Action } from "@/lib/engine/poker7/game";
 import { createSutdaHand, reduceSutda, sutdaDecks, type SutdaAction } from "@/lib/engine/sutda/game";
 import { HwatuCard } from "@/app/rooms/[id]/hwatu-card";
+import { PlayingCard } from "@/app/rooms/[id]/playing-card";
 
 export type RevealedHand = {
+  /** 초기 판에는 없음 → 섯다 */
+  game?: "sutda" | "poker7";
   rngVersion: string;
   serverSeed: string;
   clientSeeds: { seeds: SeedEntry[]; autoSeeded: string[] };
   baseBet: number;
   bossId: string;
   seats: { id: string; seatNo: number; stack: number }[];
-  actionLog: SutdaAction[];
+  actionLog: (SutdaAction | Poker7Action)[];
 };
 
 type Check = { label: string; ok: boolean | null; detail: string };
@@ -52,10 +56,14 @@ export function VerifyHand(props: {
         serverSeed: revealed.serverSeed,
         seeds: revealed.clientSeeds.seeds,
       };
-      const final = replay(createSutdaHand(params), reduceSutda, revealed.actionLog);
-      return { final, decks: sutdaDecks(params), error: null };
+      if (revealed.game === "poker7") {
+        const final = replay(createPoker7Hand(params), reducePoker7, revealed.actionLog as Poker7Action[]);
+        return { final, rematches: 0, decks: [poker7Deck(params)], error: null };
+      }
+      const final = replay(createSutdaHand(params), reduceSutda, revealed.actionLog as SutdaAction[]);
+      return { final, rematches: final.rematchNo, decks: sutdaDecks(params), error: null };
     } catch (e) {
-      return { final: null, decks: [], error: e instanceof Error ? e.message : String(e) };
+      return { final: null, rematches: 0, decks: [], error: e instanceof Error ? e.message : String(e) };
     }
   }, [handId, revealed]);
 
@@ -78,7 +86,7 @@ export function VerifyHand(props: {
     {
       label: "공개된 시드와 액션 기록으로 다시 돌린 결과가 실제 지급과 같은가",
       ok: outcome.error ? false : payoutsMatch,
-      detail: outcome.error ?? `재경기 ${outcome.final?.rematchNo ?? 0}번 포함, 액션 ${revealed.actionLog.length}개 재생`,
+      detail: outcome.error ?? `재경기 ${outcome.rematches}번 포함, 액션 ${revealed.actionLog.length}개 재생`,
     },
     {
       label: "자동 시드가 정해진 공식대로 만들어졌는가",
@@ -139,10 +147,10 @@ export function VerifyHand(props: {
 
       {outcome.decks[0] && (
         <div className="panel p-4">
-          <p className="mb-2 text-sm font-bold text-accent">첫 경기 덱 순서 (앞에서부터 보스 기준으로 한 장씩 돌림)</p>
+          <p className="mb-2 text-sm font-bold text-accent">{revealed.game === "poker7" ? "덱 순서 (좌석 순으로 한 장씩 돌림)" : "첫 경기 덱 순서 (앞에서부터 보스 기준으로 한 장씩 돌림)"}</p>
           <div className="flex flex-wrap gap-1">
             {outcome.decks[0].map((c, i) => (
-              <HwatuCard key={i} card={c} small />
+              revealed.game === "poker7" ? <PlayingCard key={i} card={c} small /> : <HwatuCard key={i} card={c} small />
             ))}
           </div>
         </div>

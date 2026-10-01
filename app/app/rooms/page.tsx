@@ -12,7 +12,7 @@ export default async function RoomsPage() {
 
   const { data: rooms } = await supabase
     .from("rooms")
-    .select("id, name, base_bet, max_seats, status, room_seats(count)")
+    .select("id, name, game, base_bet, max_seats, status, room_seats(count)")
     .neq("status", "closed")
     .order("created_at", { ascending: false });
 
@@ -22,7 +22,7 @@ export default async function RoomsPage() {
         <Link href="/" className="rounded-full border border-gold-dim px-3 py-1 text-sm font-bold text-accent">
           ‹ 로비
         </Link>
-        <h1 className="font-display text-3xl tracking-widest">SUTDA</h1>
+        <h1 className="font-display text-3xl tracking-widest">ROOMS</h1>
         <span className="w-16" />
       </header>
 
@@ -39,7 +39,7 @@ export default async function RoomsPage() {
                 <div>
                   <p className="font-bold">{r.name}</p>
                   <p className="text-xs text-muted">
-                    기본금 {r.base_bet.toLocaleString("ko-KR")}P · {r.status === "playing" ? "진행 중" : "대기 중"}
+                    {r.game === "poker7" ? "7포커" : "섯다"} · 기본금 {r.base_bet.toLocaleString("ko-KR")}P · {r.status === "playing" ? "진행 중" : "대기 중"}
                   </p>
                 </div>
                 <span className="font-display text-xl text-accent">

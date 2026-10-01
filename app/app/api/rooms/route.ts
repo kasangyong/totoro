@@ -10,6 +10,7 @@ export async function POST(request: Request) {
         name: String(body.name ?? ""),
         baseBet: Number(body.baseBet),
         maxSeats: Number(body.maxSeats),
+        game: String(body.game ?? "sutda"),
       }),
     };
   });

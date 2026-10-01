@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { BettingError } from "../engine/betting";
+import { Poker7Error } from "../engine/poker7/game";
 import { SutdaError } from "../engine/sutda/game";
 import { supabaseServer } from "../supabase/server";
 import { RoomError } from "./service";
@@ -30,7 +31,7 @@ export async function handle(fn: () => Promise<unknown>) {
       return NextResponse.json({ error: "방이 없어요." }, { status: 404 });
     }
     // 게임 규칙 위반(엔진 예외)은 400, 나머지는 500
-    if (e instanceof SutdaError || e instanceof BettingError) {
+    if (e instanceof SutdaError || e instanceof Poker7Error || e instanceof BettingError) {
       return NextResponse.json({ error: "지금 할 수 없는 동작이에요." }, { status: 400 });
     }
     console.error(e);

@@ -3,12 +3,27 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { legalActions, type BetActionType } from "../engine/betting";
 import { autoClientSeed, commitOf, isValidClientSeed, RNG_VERSION } from "../engine/rng";
-import { createSutdaHand, reduceSutda, viewSutda, type SutdaAction, type SutdaState, type SutdaView } from "../engine/sutda/game";
+import type { PokerCard } from "../engine/poker7/hands";
 import { engineDb, type Tx } from "./db";
+import {
+  createGame,
+  GAME_KINDS,
+  isDone,
+  reduceGame,
+  summarize,
+  timeoutAction,
+  viewGame,
+  waitKind,
+  type GameAction,
+  type GameKind,
+  type GameState,
+  type GameView,
+} from "./games";
 
 export const SEED_MS = 5_000;
 export const TURN_MS = 20_000;
 export const REJOIN_MS = 10_000;
+export const CHOICE_MS = 15_000;
 export const BETWEEN_MS = 5_000;
 export const SEEN_WINDOW_MS = 60_000;
 export const MIN_BUYIN_MULTIPLIER = 10;
@@ -35,8 +50,8 @@ export type RoomState = {
   seeds: Record<string, string>;
   /** 다음 판 보스 = 직전 판 메인 팟 승자 */
   bossId: string | null;
-  game: SutdaState | null;
-  log: SutdaAction[];
+  game: GameState | null;
+  log: GameAction[];
   /** 이번 판에 직접 액션한 사람 / 시간 초과 횟수 → 한 판 내내 응답 없으면 자동으로 일어섬 */
   voluntary: Record<string, boolean>;
   timeouts: Record<string, number>;
@@ -45,7 +60,7 @@ export type RoomState = {
 type RoomRow = {
   id: string;
   name: string;
-  game: string;
+  game: GameKind;
   base_bet: number;
   max_seats: number;
   host_id: string | null;
@@ -152,8 +167,13 @@ const after = (ctx: Ctx, ms: number) => new Date(ctx.now.getTime() + ms);
 
 // ── 방 만들기 · 앉기 · 일어서기 ─────────────────────────────
 
-export async function createRoom(userId: string, input: { name: string; baseBet: number; maxSeats: number }) {
+export async function createRoom(
+  userId: string,
+  input: { name: string; baseBet: number; maxSeats: number; game?: string },
+) {
   const name = input.name.trim();
+  const game = (input.game ?? "sutda") as GameKind;
+  if (!GAME_KINDS.includes(game)) throw new RoomError("없는 게임이에요.");
   if (name.length < 1 || name.length > 30) throw new RoomError("방 이름은 1~30자예요.");
   if (!Number.isSafeInteger(input.baseBet) || input.baseBet < 1 || input.baseBet > 100_000) {
     throw new RoomError("기본금은 1~100,000P예요.");
@@ -163,7 +183,7 @@ export async function createRoom(userId: string, input: { name: string; baseBet:
   return sql.begin(async (tx) => {
     const [room] = await tx<{ id: string }[]>`
       insert into public.rooms (name, game, base_bet, max_seats, host_id)
-      values (${name}, 'sutda', ${input.baseBet}, ${input.maxSeats}, ${userId}) returning id`;
+      values (${name}, ${game}, ${input.baseBet}, ${input.maxSeats}, ${userId}) returning id`;
     await tx`insert into private.room_state (room_id, state) values (${room.id}, ${tx.json(initialState() as never)})`;
     return room.id;
   });
@@ -310,7 +330,7 @@ async function deal(ctx: Ctx) {
       : ctx.room.host_id && s.players.includes(ctx.room.host_id)
         ? ctx.room.host_id
         : playerSeats[0].user_id;
-  const game = createSutdaHand({
+  const game = createGame(ctx.room.game, {
     handId,
     baseBet: ctx.room.base_bet,
     bossId,
@@ -329,21 +349,33 @@ async function deal(ctx: Ctx) {
   await afterGameStep(ctx);
 }
 
-async function applyGame(ctx: Ctx, action: SutdaAction, byUser: string | null) {
-  const game = reduceSutda(ctx.state.game!, action);
+async function applyGame(ctx: Ctx, action: GameAction, byUser: string | null) {
+  const before = ctx.state.game!;
+  const prevWait = waitKind(before);
+  const game = reduceGame(before, action);
   const s = ctx.state;
   const voluntary = byUser ? { ...s.voluntary, [byUser]: true } : s.voluntary;
-  const timeouts =
-    action.type === "timeout" ? { ...s.timeouts, [action.seatId]: (s.timeouts[action.seatId] ?? 0) + 1 } : s.timeouts;
+  // 시간 초과로 대신 처리된 사람 (베팅 차례, 또는 초이스를 끝까지 안 고른 사람)
+  const timedOut =
+    action.type === "timeout"
+      ? [action.seatId]
+      : action.type === "choice_timeout" && before.game === "poker7"
+        ? before.seats.filter((x) => !before.chosen.includes(x.id)).map((x) => x.id)
+        : [];
+  const timeouts = { ...s.timeouts };
+  for (const id of timedOut) timeouts[id] = (timeouts[id] ?? 0) + 1;
   ctx.state = { ...s, game, log: [...s.log, action], voluntary, timeouts };
   emit(ctx, "action", { type: action.type, seatId: "seatId" in action ? action.seatId : null });
-  await afterGameStep(ctx);
+  await afterGameStep(ctx, prevWait);
 }
 
-async function afterGameStep(ctx: Ctx) {
+async function afterGameStep(ctx: Ctx, prevWait?: ReturnType<typeof waitKind>) {
   const game = ctx.state.game!;
-  if (game.phase === "done") return endHand(ctx);
-  ctx.deadline = after(ctx, game.phase === "rejoin" ? REJOIN_MS : TURN_MS);
+  if (isDone(game)) return endHand(ctx);
+  const wait = waitKind(game);
+  // 동시 선택(초이스·재경기 참여)은 한 사람이 정해도 모두의 기한이 그대로다
+  if (ctx.deadline && prevWait === wait && (wait === "choice" || wait === "rejoin")) return;
+  ctx.deadline = after(ctx, wait === "rejoin" ? REJOIN_MS : wait === "choice" ? CHOICE_MS : TURN_MS);
 }
 
 async function endHand(ctx: Ctx) {
@@ -366,13 +398,9 @@ async function endHand(ctx: Ctx) {
   const [secret] = await ctx.tx<{ server_seed: string; client_seeds: unknown }[]>`
     select server_seed, client_seeds from private.hand_secrets where hand_id = ${handId}`;
   await ctx.tx`update private.hand_secrets set action_log = ${ctx.tx.json(s.log as never)} where hand_id = ${handId}`;
-  const result = {
-    payouts: game.result!.payouts,
-    winnerId: game.result!.winnerId,
-    hands: Object.fromEntries(Object.entries(game.result!.hands).map(([id, h]) => [id, h.label])),
-    rematches: game.rematchNo,
-  };
+  const result = summarize(game);
   const revealed = {
+    game: ctx.room.game,
     rngVersion: RNG_VERSION,
     serverSeed: secret.server_seed,
     clientSeeds: secret.client_seeds,
@@ -384,7 +412,7 @@ async function endHand(ctx: Ctx) {
   await ctx.tx`update public.hands set status = 'done', ended_at = now(),
                result = ${ctx.tx.json(result as never)}, revealed = ${ctx.tx.json(revealed as never)}
                where id = ${handId}`;
-  ctx.state = { ...s, phase: "between", bossId: game.result!.winnerId };
+  ctx.state = { ...s, phase: "between", bossId: result.winnerId };
   emit(ctx, "hand_end", { handId, payouts: result.payouts });
 
   // 판이 끝나면 일어설 사람: 자리 비움 표시, 기본금보다 적은 스택, 한 판 내내 응답 없던 사람
@@ -411,11 +439,23 @@ export function act(userId: string, roomId: string, action: BetActionType, expec
 export function rejoin(userId: string, roomId: string, join: boolean) {
   return withRoom(roomId, async (ctx) => {
     const game = ctx.state.game;
-    if (ctx.state.phase !== "playing" || game?.phase !== "rejoin") throw new RoomError("재경기 참여를 정할 때가 아니에요.", 409);
+    if (ctx.state.phase !== "playing" || game?.game !== "sutda" || game.phase !== "rejoin") throw new RoomError("재경기 참여를 정할 때가 아니에요.", 409);
     if (!game.rejoin!.candidates.includes(userId) || game.rejoin!.decided.includes(userId)) {
       throw new RoomError("참여를 정할 수 없어요.", 409);
     }
     await applyGame(ctx, { type: "rejoin", seatId: userId, join }, userId);
+  });
+}
+
+/** 7포커 초이스: 4장 중 버릴 카드 1장, 공개할 카드 1장 */
+export function choose(userId: string, roomId: string, discard: PokerCard, open: PokerCard) {
+  return withRoom(roomId, async (ctx) => {
+    const game = ctx.state.game;
+    if (ctx.state.phase !== "playing" || game?.game !== "poker7" || game.phase !== "choice") {
+      throw new RoomError("지금은 카드를 고를 때가 아니에요.", 409);
+    }
+    if (!game.seats.some((s) => s.id === userId) || game.chosen.includes(userId)) throw new RoomError("카드를 고를 수 없어요.", 409);
+    await applyGame(ctx, { type: "choose", seatId: userId, discard, open }, userId);
   });
 }
 
@@ -425,10 +465,7 @@ export function tick(roomId: string) {
     if (!ctx.deadline || ctx.now < new Date(ctx.deadline)) return false;
     const s = ctx.state;
     if (s.phase === "seeding") await deal(ctx);
-    else if (s.phase === "playing" && s.game) {
-      if (s.game.phase === "rejoin") await applyGame(ctx, { type: "rejoin_timeout" }, null);
-      else await applyGame(ctx, { type: "timeout", seatId: s.game.round.toActId! }, null);
-    } else if (s.phase === "between") await beginSeeding(ctx);
+    else if (s.phase === "playing" && s.game) await applyGame(ctx, timeoutAction(s.game), null); else if (s.phase === "between") await beginSeeding(ctx);
     else return false;
     return true;
   });
@@ -437,7 +474,7 @@ export function tick(roomId: string) {
 // ── 조회 (본인 시점) ─────────────────────────────────────
 
 export type RoomView = {
-  room: { id: string; name: string; baseBet: number; maxSeats: number; hostId: string | null; status: string };
+  room: { id: string; name: string; game: GameKind; baseBet: number; maxSeats: number; hostId: string | null; status: string };
   seq: number;
   phase: RoomPhase;
   serverNow: string;
@@ -449,7 +486,7 @@ export type RoomView = {
   seedsSubmitted: string[];
   needSeed: boolean;
   seats: { seatNo: number; userId: string; username: string; stack: number; status: string }[];
-  game: SutdaView | null;
+  game: GameView | null;
   legal: BetActionType[];
   me: string;
 };
@@ -468,7 +505,7 @@ export async function getRoomView(userId: string, roomId: string): Promise<RoomV
             where room_id = ${roomId} and user_id = ${userId} and last_seen_at < now() - interval '30 seconds'`;
 
   const s = row.state;
-  const game = s.game ? viewSutda(s.game, userId) : null;
+  const game = s.game ? viewGame(s.game, userId) : null;
   const liveStack = (id: string, fallback: number) =>
     s.phase === "playing" && s.game ? (s.game.seats.find((g) => g.id === id)?.stack ?? fallback) : fallback;
   const myTurn = s.phase === "playing" && s.game?.round.toActId === userId && s.game.phase !== "done";
@@ -476,6 +513,7 @@ export async function getRoomView(userId: string, roomId: string): Promise<RoomV
     room: {
       id: room.id,
       name: room.name,
+      game: room.game,
       baseBet: room.base_bet,
       maxSeats: room.max_seats,
       hostId: room.host_id,
