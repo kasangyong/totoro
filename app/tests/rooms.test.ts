@@ -4,7 +4,7 @@ import { replay } from "../lib/engine/replay";
 import { createSutdaHand, reduceSutda, type SutdaAction } from "../lib/engine/sutda/game";
 import { engineDb } from "../lib/rooms/db";
 import { act, createRoom, getRoomView, sit, stand, start, submitSeed, tick, RoomError } from "../lib/rooms/service";
-import { createUser, sql } from "./helpers";
+import { cardGame, createUser, sql } from "./helpers";
 
 const db = sql();
 afterAll(async () => {
@@ -37,12 +37,12 @@ async function playOut(roomId: string, ids: string[]) {
   for (let i = 0; i < 100; i++) {
     const v = await getRoomView(ids[0], roomId);
     if (v.phase !== "playing") return v;
-    if (v.game!.phase === "rejoin") {
+    if (cardGame(v).phase === "rejoin") {
       await db`update private.room_state set deadline = now() - interval '1 second' where room_id = ${roomId}`;
       await tick(roomId);
       continue;
     }
-    const turn = v.game!.round.toActId!;
+    const turn = cardGame(v).round.toActId!;
     const mine = await getRoomView(turn, roomId);
     await act(turn, roomId, mine.legal.includes("check") ? "check" : "call", mine.seq);
   }
@@ -78,7 +78,7 @@ describe("rooms", () => {
 
     const v = await getRoomView(ids[1], roomId);
     expect(v.phase).toBe("playing");
-    const visible = v.game!.cards.filter((c) => c.card !== null);
+    const visible = cardGame(v).cards.filter((c) => c.card !== null);
     expect(visible.every((c) => c.ownerId === ids[1] || c.faceUp)).toBe(true);
     expect(JSON.stringify(v)).not.toMatch(/decks|serverSeed|server_seed/);
 
@@ -122,7 +122,7 @@ describe("rooms", () => {
     expect(results.filter(Boolean)).toHaveLength(1);
     const [{ state }] = await db`select state from private.room_state where room_id = ${roomId}`;
     expect(state.log).toHaveLength(1);
-    expect(state.log[0]).toEqual({ type: "timeout", seatId: before.game!.round.toActId });
+    expect(state.log[0]).toEqual({ type: "timeout", seatId: cardGame(before).round.toActId });
   });
 
   it("rejects stale actions and actions out of turn", async () => {
@@ -130,7 +130,7 @@ describe("rooms", () => {
     const ids = users.map((u) => u.id);
     await dealHand(roomId, ids);
     const v = await getRoomView(ids[0], roomId);
-    const turn = v.game!.round.toActId!;
+    const turn = cardGame(v).round.toActId!;
     const other = ids.find((id) => id !== turn)!;
     await expect(act(other, roomId, "check", v.seq)).rejects.toThrow(/차례/);
     await expect(act(turn, roomId, "check", v.seq - 1)).rejects.toThrow(/최신/);
@@ -141,7 +141,7 @@ describe("rooms", () => {
     const ids = users.map((u) => u.id);
     await dealHand(roomId, ids);
     let v = await getRoomView(ids[0], roomId);
-    await act(v.game!.round.toActId!, roomId, "ping", v.seq); // 판 중에 돈이 움직인 상태
+    await act(cardGame(v).round.toActId!, roomId, "ping", v.seq); // 판 중에 돈이 움직인 상태
     await db`update public.rooms set last_activity_at = now() - interval '11 minutes' where id = ${roomId}`;
     await db`select private.close_abandoned_rooms()`;
     for (const id of ids) expect(await balance(id)).toBe(10000);

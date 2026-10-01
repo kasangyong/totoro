@@ -4,7 +4,7 @@ import { replay } from "../lib/engine/replay";
 import { createPoker7Hand, reducePoker7, type Poker7Action } from "../lib/engine/poker7/game";
 import { engineDb } from "../lib/rooms/db";
 import { act, choose, createRoom, getRoomView, rejoin, sit, start, submitSeed, tick } from "../lib/rooms/service";
-import { createUser, sql } from "./helpers";
+import { cardGame, createUser, sql } from "./helpers";
 
 const db = sql();
 afterAll(async () => {
@@ -32,22 +32,22 @@ describe("7포커 방", () => {
     const { ids, roomId } = await pokerTable(3);
     let v = await getRoomView(ids[0], roomId);
     expect(v.room.game).toBe("poker7");
-    expect(v.game!.game).toBe("poker7");
-    expect(v.game!.phase).toBe("choice");
+    expect(cardGame(v).game).toBe("poker7");
+    expect(cardGame(v).phase).toBe("choice");
 
     for (const id of ids) {
-      const mine = (await getRoomView(id, roomId)).game!.cards.filter((c) => c.ownerId === id).map((c) => c.card!);
+      const mine = cardGame(await getRoomView(id, roomId)).cards.filter((c) => c.ownerId === id).map((c) => c.card!);
       expect(mine).toHaveLength(4);
-      const others = (await getRoomView(id, roomId)).game!.cards.filter((c) => c.ownerId !== id);
+      const others = cardGame(await getRoomView(id, roomId)).cards.filter((c) => c.ownerId !== id);
       expect(others.every((c) => c.card === null)).toBe(true);
       await choose(id, roomId, mine[0], mine[1]);
     }
     v = await getRoomView(ids[1], roomId);
-    expect(v.game!.phase).toBe("bet");
+    expect(cardGame(v).phase).toBe("bet");
     expect(JSON.stringify(v)).not.toMatch(/"deck"|choices|serverSeed/);
 
     for (let i = 0; i < 60 && v.phase === "playing"; i++) {
-      const turn = v.game!.round.toActId!;
+      const turn = cardGame(v).round.toActId!;
       const mine = await getRoomView(turn, roomId);
       await act(turn, roomId, mine.legal.includes("check") ? "check" : "call", mine.seq);
       v = await getRoomView(ids[0], roomId);
@@ -70,18 +70,18 @@ describe("7포커 방", () => {
 
   it("auto-chooses for players who miss the choice deadline", async () => {
     const { ids, roomId } = await pokerTable(2);
-    const mine = (await getRoomView(ids[0], roomId)).game!.cards.filter((c) => c.ownerId === ids[0]).map((c) => c.card!);
+    const mine = cardGame(await getRoomView(ids[0], roomId)).cards.filter((c) => c.ownerId === ids[0]).map((c) => c.card!);
     await choose(ids[0], roomId, mine[0], mine[1]);
     await db`update private.room_state set deadline = now() - interval '1 second' where room_id = ${roomId}`;
     expect(await tick(roomId)).toBe(true);
     const v = await getRoomView(ids[1], roomId);
-    expect(v.game!.phase).toBe("bet");
+    expect(cardGame(v).phase).toBe("bet");
   });
 
   it("keeps one shared choice deadline instead of extending it on every choice", async () => {
     const { ids, roomId } = await pokerTable(3);
     const before = (await getRoomView(ids[0], roomId)).deadline;
-    const mine = (await getRoomView(ids[0], roomId)).game!.cards.filter((c) => c.ownerId === ids[0]).map((c) => c.card!);
+    const mine = cardGame(await getRoomView(ids[0], roomId)).cards.filter((c) => c.ownerId === ids[0]).map((c) => c.card!);
     await new Promise((r) => setTimeout(r, 1100));
     await choose(ids[0], roomId, mine[0], mine[1]);
     expect((await getRoomView(ids[1], roomId)).deadline).toBe(before);
@@ -100,7 +100,7 @@ describe("7포커 방", () => {
     await expect(rejoin(ids[0], roomId, true)).rejects.toThrow(/재경기/);
     const v = await getRoomView(ids[0], roomId);
     await expect(act(ids[0], roomId, "check", v.seq)).rejects.toThrow(/차례/);
-    const mine = v.game!.cards.filter((c) => c.ownerId === ids[0]).map((c) => c.card!);
+    const mine = cardGame(v).cards.filter((c) => c.ownerId === ids[0]).map((c) => c.card!);
     await choose(ids[0], roomId, mine[0], mine[1]);
     await expect(choose(ids[0], roomId, mine[2], mine[3])).rejects.toThrow(/고를 수 없어요/);
   });

@@ -1,7 +1,9 @@
 // 방 서비스 — rooms-arch.md 결정 1·4·5·6·7.
 // 모든 변경은 트랜잭션 1개: room_state → rooms → room_seats(seat_no 순) 순서로 잠그고, 원장은 table_buyin/cashout 함수로만 움직인다.
 import { randomBytes, randomUUID } from "node:crypto";
-import { legalActions, type BetActionType } from "../engine/betting";
+import type { BetActionType } from "../engine/betting";
+import type { BjMove } from "../engine/blackjack/game";
+import { MAX_BET } from "../engine/solo/games";
 import { autoClientSeed, commitOf, isValidClientSeed, RNG_VERSION } from "../engine/rng";
 import type { PokerCard } from "../engine/poker7/hands";
 import { engineDb, type Tx } from "./db";
@@ -9,8 +11,11 @@ import {
   createGame,
   GAME_KINDS,
   isDone,
+  legalFor,
+  minPlayers,
   reduceGame,
   summarize,
+  timedOutBy,
   timeoutAction,
   viewGame,
   waitKind,
@@ -18,12 +23,14 @@ import {
   type GameKind,
   type GameState,
   type GameView,
+  type LegalAction,
 } from "./games";
 
 export const SEED_MS = 5_000;
 export const TURN_MS = 20_000;
 export const REJOIN_MS = 10_000;
 export const CHOICE_MS = 15_000;
+export const BET_MS = 15_000;
 export const BETWEEN_MS = 5_000;
 export const SEEN_WINDOW_MS = 60_000;
 export const MIN_BUYIN_MULTIPLIER = 10;
@@ -73,6 +80,7 @@ type SeatRow = {
   user_id: string;
   seat_session_id: string;
   stack: number;
+  hand_contrib: number;
   hand_start_stack: number | null;
   status: "sitting" | "away";
   last_seen_at: Date;
@@ -140,6 +148,10 @@ async function withRoom<T>(roomId: string, fn: (ctx: Ctx) => Promise<T> | T): Pr
     if (code === "P0001") throw new RoomError("포인트가 모자라요.", 400);
     if (code === "P0005") throw new RoomError("관리자는 카드 방에 앉을 수 없어요.", 403);
     if (code === "23505") throw new RoomError("이미 처리된 요청이에요.", 409);
+    if (code === "P0006") {
+      console.error("blackjack settlement rejected", roomId, e);
+      throw new RoomError("정산 기록이 맞지 않아요.", 500);
+    }
     throw e;
   }
 }
@@ -179,6 +191,9 @@ export async function createRoom(
     throw new RoomError("기본금은 1~100,000P예요.");
   }
   if (!Number.isInteger(input.maxSeats) || input.maxSeats < 2 || input.maxSeats > 6) throw new RoomError("인원은 2~6명이에요.");
+  if (game === "blackjack" && (input.baseBet < 10 || input.baseBet % 2 !== 0)) {
+    throw new RoomError("블랙잭 기본금은 10P 이상 짝수예요.");
+  }
   const sql = engineDb();
   return sql.begin(async (tx) => {
     const [room] = await tx<{ id: string }[]>`
@@ -236,6 +251,11 @@ export function stand(userId: string, roomId: string) {
       await ctx.tx`update public.room_seats set status = 'away' where seat_session_id = ${seat.seat_session_id}`;
       seat.status = "away";
       emit(ctx, "away", { userId });
+      // 블랙잭 베팅 단계에서 아직 안 정했으면 이번 판은 쉬기 (기한까지 기다리지 않음)
+      const g = ctx.state.game;
+      if (ctx.state.phase === "playing" && g?.game === "blackjack" && g.phase === "bet" && g.seats.some((x) => x.id === userId && x.status === "waiting")) {
+        await applyGame(ctx, { type: "sit_out", seatId: userId }, userId);
+      }
       return "after_hand" as const;
     }
     await leaveSeat(ctx, seat);
@@ -260,7 +280,8 @@ export function start(userId: string, roomId: string) {
   return withRoom(roomId, async (ctx) => {
     if (ctx.room.host_id !== userId) throw new RoomError("방장만 시작할 수 있어요.", 403);
     if (ctx.state.phase !== "idle" && ctx.state.phase !== "between") throw new RoomError("이미 진행 중이에요.", 409);
-    if (eligibleSeats(ctx).length < 2) throw new RoomError("2명 이상 앉아야 시작할 수 있어요.", 409);
+    const min = minPlayers(ctx.room.game);
+    if (eligibleSeats(ctx).length < min) throw new RoomError(`${min}명 이상 앉아야 시작할 수 있어요.`, 409);
     await beginSeeding(ctx);
   });
 }
@@ -273,7 +294,7 @@ async function beginSeeding(ctx: Ctx) {
   }
   if (ctx.seats.length === 0) return closeIfEmpty(ctx);
   const players = eligibleSeats(ctx);
-  if (players.length < 2) {
+  if (players.length < minPlayers(ctx.room.game)) {
     ctx.state = { ...ctx.state, phase: "idle", players: [] };
     ctx.deadline = null;
     await ctx.tx`update public.rooms set status = 'waiting' where id = ${ctx.room.id}`;
@@ -346,7 +367,14 @@ async function deal(ctx: Ctx) {
                set client_seeds = ${ctx.tx.json({ seeds, autoSeeded } as never)} where hand_id = ${handId}`;
   ctx.state = { ...s, phase: "playing", bossId, game };
   emit(ctx, "deal", { handId, autoSeeded });
-  await afterGameStep(ctx);
+  ctx.deadline = null;
+  // 블랙잭: 일어서기를 눌러 둔 사람은 이번 판 쉬기 (첫 쉬기가 베팅 기한을 잡는다)
+  const away = game.game === "blackjack" ? playerSeats.filter((x) => x.status === "away") : [];
+  if (away.length === 0) return afterGameStep(ctx);
+  for (const x of away) {
+    if (ctx.state.phase !== "playing") break;
+    await applyGame(ctx, { type: "sit_out", seatId: x.user_id }, null);
+  }
 }
 
 async function applyGame(ctx: Ctx, action: GameAction, byUser: string | null) {
@@ -355,15 +383,19 @@ async function applyGame(ctx: Ctx, action: GameAction, byUser: string | null) {
   const game = reduceGame(before, action);
   const s = ctx.state;
   const voluntary = byUser ? { ...s.voluntary, [byUser]: true } : s.voluntary;
-  // 시간 초과로 대신 처리된 사람 (베팅 차례, 또는 초이스를 끝까지 안 고른 사람)
-  const timedOut =
-    action.type === "timeout"
-      ? [action.seatId]
-      : action.type === "choice_timeout" && before.game === "poker7"
-        ? before.seats.filter((x) => !before.chosen.includes(x.id)).map((x) => x.id)
-        : [];
+  // 시간 초과로 대신 처리된 사람 (베팅 차례, 초이스·블랙잭 베팅을 끝까지 안 정한 사람)
   const timeouts = { ...s.timeouts };
-  for (const id of timedOut) timeouts[id] = (timeouts[id] ?? 0) + 1;
+  for (const id of timedOutBy(before, action)) timeouts[id] = (timeouts[id] ?? 0) + 1;
+  // 블랙잭: 걸린 금액을 좌석에 바로 기록 (방치 청소 때 몰수 기준, 정산 때 검사 기준)
+  if (game.game === "blackjack" && before.game === "blackjack") {
+    for (const gs of game.seats) {
+      if (gs.committed === before.seats.find((x) => x.id === gs.id)!.committed) continue;
+      await ctx.tx`update public.room_seats set hand_contrib = ${gs.committed}
+                   where room_id = ${ctx.room.id} and user_id = ${gs.id}`;
+      const row = seatOf(ctx, gs.id);
+      if (row) row.hand_contrib = gs.committed;
+    }
+  }
   ctx.state = { ...s, game, log: [...s.log, action], voluntary, timeouts };
   emit(ctx, "action", { type: action.type, seatId: "seatId" in action ? action.seatId : null });
   await afterGameStep(ctx, prevWait);
@@ -373,9 +405,9 @@ async function afterGameStep(ctx: Ctx, prevWait?: ReturnType<typeof waitKind>) {
   const game = ctx.state.game!;
   if (isDone(game)) return endHand(ctx);
   const wait = waitKind(game);
-  // 동시 선택(초이스·재경기 참여)은 한 사람이 정해도 모두의 기한이 그대로다
-  if (ctx.deadline && prevWait === wait && (wait === "choice" || wait === "rejoin")) return;
-  ctx.deadline = after(ctx, wait === "rejoin" ? REJOIN_MS : wait === "choice" ? CHOICE_MS : TURN_MS);
+  // 동시 선택(초이스·재경기 참여·블랙잭 베팅)은 한 사람이 정해도 모두의 기한이 그대로다
+  if (ctx.deadline && prevWait === wait && (wait === "choice" || wait === "rejoin" || wait === "bet")) return;
+  ctx.deadline = after(ctx, wait === "rejoin" ? REJOIN_MS : wait === "choice" ? CHOICE_MS : wait === "bet" ? BET_MS : TURN_MS);
 }
 
 async function endHand(ctx: Ctx) {
@@ -386,13 +418,28 @@ async function endHand(ctx: Ctx) {
   const startSeats = ctx.seats
     .filter((x) => s.players.includes(x.user_id))
     .map((x) => ({ id: x.user_id, seatNo: x.seat_no, stack: x.hand_start_stack! }));
-  for (const gs of game.seats) {
-    await ctx.tx`update public.room_seats set stack = ${gs.stack}, hand_start_stack = null
-                 where room_id = ${ctx.room.id} and user_id = ${gs.id}`;
-    const row = seatOf(ctx, gs.id);
-    if (row) {
-      row.stack = gs.stack;
-      row.hand_start_stack = null;
+  if (game.game === "blackjack") {
+    // 하우스 정산은 함수 하나로 (스택 변경 + 정산 기록, blackjack-arch 결정 1). 돌려받은 스택으로 아래 자동 일어서기를 한다.
+    const rows = game.seats.map((g) => ({ user_id: g.id, bet_total: g.committed, delta: g.stack - g.startStack }));
+    const settled = await ctx.tx<{ user_id: string; stack: number }[]>`
+      select user_id, stack from private.settle_blackjack_hand(${handId}, ${ctx.tx.json(rows)})`;
+    for (const r of settled) {
+      const row = seatOf(ctx, r.user_id);
+      if (row) {
+        row.stack = Number(r.stack);
+        row.hand_start_stack = null;
+        row.hand_contrib = 0;
+      }
+    }
+  } else {
+    for (const gs of game.seats) {
+      await ctx.tx`update public.room_seats set stack = ${gs.stack}, hand_start_stack = null
+                   where room_id = ${ctx.room.id} and user_id = ${gs.id}`;
+      const row = seatOf(ctx, gs.id);
+      if (row) {
+        row.stack = gs.stack;
+        row.hand_start_stack = null;
+      }
     }
   }
   const [secret] = await ctx.tx<{ server_seed: string; client_seeds: unknown }[]>`
@@ -412,7 +459,7 @@ async function endHand(ctx: Ctx) {
   await ctx.tx`update public.hands set status = 'done', ended_at = now(),
                result = ${ctx.tx.json(result as never)}, revealed = ${ctx.tx.json(revealed as never)}
                where id = ${handId}`;
-  ctx.state = { ...s, phase: "between", bossId: result.winnerId };
+  ctx.state = { ...s, phase: "between", bossId: result.winnerId ?? s.bossId };
   emit(ctx, "hand_end", { handId, payouts: result.payouts });
 
   // 판이 끝나면 일어설 사람: 자리 비움 표시, 기본금보다 적은 스택, 한 판 내내 응답 없던 사람
@@ -426,13 +473,26 @@ async function endHand(ctx: Ctx) {
 
 // ── 사용자 액션 · 타이머 ─────────────────────────────────
 
-export function act(userId: string, roomId: string, action: BetActionType, expectedSeq: number) {
+/** 섯다·포커 베팅 액션, 또는 블랙잭 bet(amount)·sit_out·hit·stand·double·split */
+export function act(userId: string, roomId: string, action: LegalAction, expectedSeq: number, amount?: number) {
   return withRoom(roomId, async (ctx) => {
     if (ctx.seq !== expectedSeq) throw new RoomError("화면이 최신이 아니에요. 다시 불러올게요.", 409);
     const game = ctx.state.game;
-    if (ctx.state.phase !== "playing" || !game || game.round.toActId !== userId) throw new RoomError("내 차례가 아니에요.", 409);
-    if (!legalActions(game.seats, game.round, userId).includes(action)) throw new RoomError("지금 할 수 없는 액션이에요.");
-    await applyGame(ctx, { type: "bet", seatId: userId, action }, userId);
+    const legal = ctx.state.phase === "playing" && game ? legalFor(game, userId) : [];
+    if (!game || legal.length === 0) throw new RoomError("내 차례가 아니에요.", 409);
+    if (!legal.includes(action)) throw new RoomError("지금 할 수 없는 액션이에요.");
+    if (game.game !== "blackjack") {
+      return applyGame(ctx, { type: "bet", seatId: userId, action: action as BetActionType }, userId);
+    }
+    if (action === "bet") {
+      const max = Math.min(game.seats.find((x) => x.id === userId)!.stack, MAX_BET);
+      if (amount === undefined || !Number.isSafeInteger(amount) || amount % 2 !== 0 || amount < game.baseBet || amount > max) {
+        throw new RoomError(`베팅은 ${game.baseBet.toLocaleString("ko-KR")}~${max.toLocaleString("ko-KR")}P 사이 짝수로 해 주세요.`);
+      }
+      return applyGame(ctx, { type: "bet", seatId: userId, amount }, userId);
+    }
+    if (action === "sit_out") return applyGame(ctx, { type: "sit_out", seatId: userId }, userId);
+    return applyGame(ctx, { type: "move", seatId: userId, move: action as BjMove }, userId);
   });
 }
 
@@ -487,7 +547,7 @@ export type RoomView = {
   needSeed: boolean;
   seats: { seatNo: number; userId: string; username: string; stack: number; status: string }[];
   game: GameView | null;
-  legal: BetActionType[];
+  legal: LegalAction[];
   me: string;
 };
 
@@ -508,7 +568,6 @@ export async function getRoomView(userId: string, roomId: string): Promise<RoomV
   const game = s.game ? viewGame(s.game, userId) : null;
   const liveStack = (id: string, fallback: number) =>
     s.phase === "playing" && s.game ? (s.game.seats.find((g) => g.id === id)?.stack ?? fallback) : fallback;
-  const myTurn = s.phase === "playing" && s.game?.round.toActId === userId && s.game.phase !== "done";
   return {
     room: {
       id: room.id,
@@ -537,7 +596,7 @@ export async function getRoomView(userId: string, roomId: string): Promise<RoomV
       status: x.status,
     })),
     game,
-    legal: myTurn ? legalActions(s.game!.seats, s.game!.round, userId) : [],
+    legal: s.phase === "playing" && s.game ? legalFor(s.game, userId) : [],
     me: userId,
   };
 }

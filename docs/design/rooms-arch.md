@@ -118,7 +118,7 @@
 - 원장 kind: `table_buyin`(−), `table_cashout`(+), `ref_id = 'seat:{seat_session_id}'` (착석마다 새 uuid → 착석 1회당 바이인·반환 각 1번).
 - 바이인: 기본금 × 10 이상 ~ 보유 전부.
 - **스택 원천 (구현 반영):** 판 밖에서는 `room_seats.stack`이 원천. 판이 시작되면 `hand_start_stack = stack`을 기록하고, 판 도중 실시간 스택은 `room_state.state.game`에만 있다 (`room_seats.stack`은 판 시작 값 그대로). 판이 끝나면 최종 스택을 `room_seats.stack`에 쓰고 `hand_start_stack = null`. `hand_contrib` 컬럼은 쓰지 않음.
-- 보존 불변식: 언제나 `Σ원장 = Σ지갑 + Σroom_seats.stack` (판 도중에는 판 시작 스택 기준이라 성립). 판 무효 처리 = 판 시작 스택으로 반환.
+- 보존 불변식: 언제나 `Σ원장 = Σ지갑 + Σroom_seats.stack` (판 도중에는 판 시작 스택 기준이라 성립). 판 무효 처리 = 판 시작 스택으로 반환. **블랙잭 방은 예외**: 하우스와 정산하므로 `Σtable_buyin − Σtable_cashout + Σhouse_settlements.delta = Σroom_seats.stack`, 판 도중 방치 청소 때는 걸린 금액(`hand_contrib`)을 몰수 — [blackjack-arch.md](blackjack-arch.md) 결정 1.
 - 나머지 처리: 균등 분배·사이드팟의 나머지 포인트는 **좌석 번호가 가장 낮은 수령자에게** (소멸 없음). 규칙 문서도 동일하게 수정.
 
 ---
@@ -135,7 +135,7 @@
 - **자동 액션도 액션 로그에 `timeout`으로 기록** (검증 재생 가능). 결정성은 로그된 액션 순서만으로 성립하고 수신 시각에 의존하지 않음.
 - **밀린 tick은 현재 판 종료까지만 처리**, 새 판을 자동으로 연속 시작하지 않음.
 - **한 판 동안 본인 액션이 하나도 없던 좌석**(전부 timeout)은 판 종료 시 자동으로 일어섬 → 스택 반환.
-- 다음 판: 판 종료 5초 후, 앉아 있는 사람 2명 이상이면 시작. 이때 `room_seats.last_seen_at`이 최근 60초 안인 좌석만 참가(나머지는 일어섬·반환).
+- 다음 판: 판 종료 5초 후, 앉아 있는 사람이 게임별 최소 인원(섯다·포커 2명, 블랙잭 1명) 이상이면 시작. 이때 `room_seats.last_seen_at`이 최근 60초 안인 좌석만 참가(나머지는 일어섬·반환).
 - 갱신 규칙: `last_seen_at` = 그 좌석 사용자의 state 조회·action·tick마다 (state GET은 이 컬럼 하나만 씀, 30초에 1번으로 제한). `rooms.last_activity_at` = action·tick·착석·일어서기마다.
 - **방치된 방 청소 (`pg_cron` 매 1분, SQL만):** `rooms.last_activity_at < now() − 10분`이고 `closed`가 아니면 `private.close_abandoned_room(room)` — 엔진과 **같은 잠금 순서**(`room_state FOR UPDATE` → `room_seats` → `profiles`), 잠근 뒤 조건 재확인, 끝에 `room_state.seq` 증가 + 종료 상태 기록(늦게 온 action/tick은 409):
   1. 진행 중 판 **무효**: 각 좌석 `stack = hand_start_stack` (판 시작 시점 스택으로 되돌림 — 재경기 이월 팟·먼저 지급분까지 한 번에 원상복구), `hand_contrib = 0`, 판 결과 `void` 기록. `room_seats.hand_start_stack`은 판 시작 트랜잭션에서 기록.
@@ -148,7 +148,7 @@
 ## 결정 7. 방 생명주기
 
 - 방 만들기: 게임(`sutda` | `poker7`), 기본금, 최대 인원(2~6). **공개 방만** (친구 10명이라 비공개 코드 불필요, 코드 해시 역산 문제 회피).
-- 상태: `waiting` → (2명 이상 착석 + 방장 시작) → `playing` → 전원 이탈·청소 시 `closed`.
+- 상태: `waiting` → (최소 인원 이상 착석 + 방장 시작) → `playing` → 전원 이탈·청소 시 `closed`.
 - 방장 이탈 시 좌석 번호가 가장 낮은 사람이 방장.
 - 중간 이탈: 자기 턴에 timeout 규칙 → 판 종료 시 일어섬·반환.
 - 관전: 누구나, 공개 정보만. 관리자는 관전만.

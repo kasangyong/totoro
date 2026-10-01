@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BetActionType } from "@/lib/engine/betting";
+import type { LegalAction } from "@/lib/rooms/games";
 import type { RoomView } from "@/lib/rooms/service";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { HwatuCard } from "./hwatu-card";
 import { HandRanks, myHandLabel } from "./hand-ranks";
 import { PlayingCard } from "./playing-card";
 
-const ACTION_LABEL: Record<BetActionType, string> = {
+const ACTION_LABEL: Record<LegalAction, string> = {
   check: "체크",
   ping: "삥",
   call: "콜",
@@ -17,6 +17,12 @@ const ACTION_LABEL: Record<BetActionType, string> = {
   quarter: "쿼터",
   half: "하프",
   die: "다이",
+  bet: "베팅",
+  sit_out: "이번 판 쉬기",
+  hit: "히트",
+  stand: "스탠드",
+  double: "더블",
+  split: "스플릿",
 };
 
 const PHASE_LABEL: Record<string, string> = {
@@ -136,7 +142,8 @@ export function RoomTable({ roomId }: { roomId: string }) {
 
   const me = view.me;
   const mySeat = view.seats.find((s) => s.userId === me);
-  const game = view.game;
+  // 블랙잭 무대는 BJ3에서 따로 그린다. 여기서는 섯다·포커만.
+  const game = view.game && view.game.game !== "blackjack" ? view.game : null;
   const remaining = view.deadline ? Math.max(0, new Date(view.deadline).getTime() - now) : null;
   // 단계별 제한 시간 (lib/rooms/service.ts의 SEED_MS·TURN_MS·REJOIN_MS·BETWEEN_MS와 같게)
   const totalMs =
@@ -166,7 +173,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
   const result = view.phase === "between" && game?.result ? game.result : null;
 
   const myCards = game ? game.cards.filter((c) => c.ownerId === me && c.card !== null).map((c) => c.card!) : [];
-  const myLabel = myHandLabel(view.room.game, myCards);
+  const myLabel = game ? myHandLabel(game.game, myCards) : null;
   const myGameSeat = gameSeat(me);
   const myTurn = view.legal.length > 0;
   const others = view.seats.filter((s) => s.userId !== me);
@@ -452,14 +459,14 @@ export function RoomTable({ roomId }: { roomId: string }) {
         {game && mySeat && (
           <>
             <div className="hidden min-h-0 overflow-auto lg:block">
-              <HandRanks game={view.room.game} myCards={myCards} />
+              <HandRanks game={game.game} myCards={myCards} />
             </div>
             <details className="panel p-3 lg:hidden">
               <summary className="cursor-pointer text-sm font-bold text-accent">
                 족보 보기{myLabel ? ` · 내 패: ${myLabel}` : ""}
               </summary>
               <div className="mt-2">
-                <HandRanks game={view.room.game} myCards={myCards} />
+                <HandRanks game={game.game} myCards={myCards} />
               </div>
             </details>
           </>

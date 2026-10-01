@@ -1,9 +1,13 @@
 import type { NextRequest } from "next/server";
-import type { BetActionType } from "@/lib/engine/betting";
+import type { LegalAction } from "@/lib/rooms/games";
 import { handle, readJson, requireUser } from "@/lib/rooms/http";
 import { act, choose, rejoin, RoomError, sit, stand, start, submitSeed, tick } from "@/lib/rooms/service";
 
-const BET_ACTIONS: readonly BetActionType[] = ["check", "ping", "call", "ddadang", "quarter", "half", "die"];
+const ACTIONS: readonly LegalAction[] = [
+  "check", "ping", "call", "ddadang", "quarter", "half", "die",
+  // 블랙잭
+  "bet", "sit_out", "hit", "stand", "double", "split",
+];
 
 export async function POST(request: NextRequest, ctx: RouteContext<"/api/rooms/[id]/[op]">) {
   return handle(async () => {
@@ -20,9 +24,10 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/rooms/[
       case "seed":
         return submitSeed(userId, id, String(body.clientSeed ?? ""));
       case "act": {
-        const action = body.action as BetActionType;
-        if (!BET_ACTIONS.includes(action)) throw new RoomError("알 수 없는 액션이에요.");
-        return act(userId, id, action, Number(body.expectedSeq));
+        const action = body.action as LegalAction;
+        if (!ACTIONS.includes(action)) throw new RoomError("알 수 없는 액션이에요.");
+        const amount = body.amount === undefined ? undefined : Number(body.amount);
+        return act(userId, id, action, Number(body.expectedSeq), amount);
       }
       case "rejoin":
         return rejoin(userId, id, body.join === true);

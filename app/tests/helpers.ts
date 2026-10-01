@@ -1,6 +1,9 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import { usernameToEmail } from "../lib/auth";
+import type { Poker7View } from "../lib/engine/poker7/game";
+import type { SutdaView } from "../lib/engine/sutda/game";
+import type { RoomView } from "../lib/rooms/service";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -30,3 +33,6 @@ export async function createUser(username = uniqueName()): Promise<{ id: string;
   if (signInError) throw signInError;
   return { id: data.user.id, client, username };
 }
+
+/** 섯다·포커 방 테스트용: 상태 응답의 게임을 카드 게임 view로 본다 */
+export const cardGame = (v: RoomView) => v.game as SutdaView | Poker7View;
