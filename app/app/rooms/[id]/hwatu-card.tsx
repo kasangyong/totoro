@@ -1,11 +1,13 @@
 import { isSpecial, monthOf } from "@/lib/engine/sutda/hands";
+import { HwatuArt } from "./hwatu-art";
 
 const GWANG = new Set([1, 3, 8]);
 const YEOL = new Set([4, 7, 9]);
 
 /** 화투 한 장. card가 null이면 뒷면. */
 export function HwatuCard({ card, small }: { card: number | null; small?: boolean }) {
-  const size = small ? "h-14 w-10" : "h-24 w-16";
+  // 큰 카드는 휴대폰에서 조금 작게 (4장이 한 줄에 들어가게)
+  const size = small ? "h-[72px] w-[50px]" : "h-24 w-[66px] sm:h-32 sm:w-[88px]";
   if (card === null) {
     return (
       <div
@@ -22,17 +24,28 @@ export function HwatuCard({ card, small }: { card: number | null; small?: boolea
     <div
       role="img"
       aria-label={`${month}월${tag === "광" ? " 광" : tag === "열" ? " 열끗" : ""}`}
-      className={`${size} flex flex-col items-center justify-between rounded-md border-2 border-[#5a1a16] bg-[var(--card)] py-1 font-display font-bold text-[var(--card-red)] shadow-md`}
+      className={`${size} relative overflow-hidden rounded-md border-2 border-[#5a1a16] bg-[var(--card)] font-display font-bold text-[var(--card-red)] shadow-md`}
     >
-      <span className={small ? "text-lg leading-none" : "text-3xl leading-none"}>{month}</span>
-      {tag ? (
+      <svg viewBox="0 0 60 96" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden focusable="false">
+        <HwatuArt month={month} special={special} />
+      </svg>
+      <span
+        aria-hidden
+        className={`absolute left-0.5 top-0.5 flex items-center justify-center rounded-full border border-[#5a1a16]/40 bg-[var(--card)] leading-none ${
+          small ? "h-3.5 w-3.5 text-[9px]" : "h-5 w-5 text-xs"
+        }`}
+      >
+        {month}
+      </span>
+      {tag && (
         <span
-          className={`rounded px-1 leading-4 ${small ? "text-[9px]" : "text-[11px]"} ${tag === "광" ? "bg-[var(--card-red)] text-white" : "bg-[#1c2030] text-white"}`}
+          aria-hidden
+          className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded px-1 leading-4 ${small ? "text-[9px]" : "text-[11px]"} ${
+            tag === "광" ? "bg-[var(--card-red)] text-white" : "bg-[#1c2030] text-white"
+          }`}
         >
           {tag === "광" ? "광" : "열끗"}
         </span>
-      ) : (
-        <span className={small ? "h-3" : "h-4"} aria-hidden />
       )}
     </div>
   );

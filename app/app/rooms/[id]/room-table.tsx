@@ -6,7 +6,7 @@ import type { BetActionType } from "@/lib/engine/betting";
 import type { RoomView } from "@/lib/rooms/service";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { HwatuCard } from "./hwatu-card";
-import { HandRanks } from "./hand-ranks";
+import { HandRanks, myHandLabel } from "./hand-ranks";
 import { PlayingCard } from "./playing-card";
 
 const ACTION_LABEL: Record<BetActionType, string> = {
@@ -165,240 +165,318 @@ export function RoomTable({ roomId }: { roomId: string }) {
   const minBuyIn = view.room.baseBet * 10;
   const result = view.phase === "between" && game?.result ? game.result : null;
 
+  const myCards = game ? game.cards.filter((c) => c.ownerId === me && c.card !== null).map((c) => c.card!) : [];
+  const myLabel = myHandLabel(view.room.game, myCards);
+  const myGameSeat = gameSeat(me);
+  const myTurn = view.legal.length > 0;
+  const others = view.seats.filter((s) => s.userId !== me);
+  const status =
+    view.phase === "seeding"
+      ? `모두의 시드를 모으는 중 (${view.seedsSubmitted.length}/${view.players.length})`
+      : view.phase === "playing" && sutda?.phase === "rejoin"
+        ? "구사 재경기 · 죽은 사람 참여 결정 중"
+        : view.phase === "playing" && sutda
+          ? `${sutda.rematchNo > 0 ? `재경기 ${sutda.rematchNo} · ` : ""}${sutda.phase === "bet1" ? "1차 베팅" : "2차 베팅"}`
+          : view.phase === "playing" && poker?.phase === "choice"
+            ? `초이스 · 버릴 카드와 공개할 카드를 고르는 중 (${poker.chosen.length}/${poker.seats.length})`
+            : view.phase === "playing" && poker?.phase === "bet"
+              ? `${poker.street}구${poker.street === 7 ? " (히든)" : ""} 베팅`
+              : view.phase === "between"
+                ? "판이 끝났어요"
+                : view.phase === "idle"
+                  ? "2명 이상 앉으면 방장이 시작할 수 있어요"
+                  : PHASE_LABEL[view.phase];
+
+  const seatBadges = (userId: string, turn: boolean) => {
+    const gs = gameSeat(userId);
+    const seat = view.seats.find((s) => s.userId === userId);
+    const hand = result?.hands[userId];
+    const handLabel = hand ? ("label" in hand ? hand.label : hand.category) : undefined;
+    const won = result && (result.payouts[userId] ?? 0) > 0;
+    return (
+      <>
+        {bossId === userId && <Badge>보스</Badge>}
+        {poker?.phase === "choice" && poker.chosen.includes(userId) && <Badge>고름</Badge>}
+        {view.room.hostId === userId && <Badge>방장</Badge>}
+        {turn && <Badge tone="accent">차례</Badge>}
+        {gs?.folded && view.players.includes(userId) && <Badge tone="bust">다이</Badge>}
+        {gs?.allIn && !gs.folded && <Badge tone="accent">올인</Badge>}
+        {seat?.status === "away" && <Badge>자리 비움</Badge>}
+        {handLabel && <Badge tone={won ? "win" : undefined}>{handLabel}</Badge>}
+      </>
+    );
+  };
+  const isTurn = (id: string) =>
+    game?.round.toActId === id && game.phase !== "done" && game.phase !== "rejoin" && game.phase !== "choice";
+
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-5">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-accent/30 pb-3">
-        <Link href="/rooms" className="rounded-full border border-gold-dim px-3 py-1 text-sm font-bold text-accent">
+    // 데스크톱은 화면 높이에 딱 맞춘다 (스크롤 없이 한 화면). 모바일은 내용만큼 늘어나되 조작부는 아래에 붙는다.
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-3 py-3 lg:h-dvh">
+      <header className="flex items-center justify-between gap-3 border-b border-accent/30 pb-2">
+        <Link href="/rooms" className="shrink-0 rounded-full border border-gold-dim px-3 py-1 text-sm font-bold text-accent">
           ‹ 방 목록
         </Link>
-        <div className="text-center">
-          <h1 className="font-bold">{view.room.name}</h1>
-          <p className="text-xs text-muted">
-            {view.room.game === "poker7" ? "7포커" : "섯다"} · 기본금 {view.room.baseBet.toLocaleString("ko-KR")}P · {view.handNo > 0 ? `${view.handNo}번째 판` : "첫 판 전"} ·{" "}
-            {PHASE_LABEL[view.phase]}
+        <div className="min-w-0 flex-1 text-center">
+          <h1 className="truncate font-bold">{view.room.name}</h1>
+          <p className="truncate text-xs text-muted">
+            {view.room.game === "poker7" ? "7포커" : "섯다"} · 기본금 {view.room.baseBet.toLocaleString("ko-KR")}P ·{" "}
+            {view.handNo > 0 ? `${view.handNo}번째 판` : "첫 판 전"}
           </p>
         </div>
-        <span className="w-20 text-right text-xs text-muted">{view.commit ? `커밋 ${view.commit.slice(0, 8)}…` : ""}</span>
+        <span className="hidden w-24 shrink-0 text-right text-[11px] text-muted sm:block">
+          {view.commit ? `커밋 ${view.commit.slice(0, 8)}…` : ""}
+        </span>
       </header>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_230px]">
-      <section className="stage grid gap-4 p-4 sm:p-6">
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted">
-            {view.phase === "seeding" && `모두의 시드를 모으는 중 (${view.seedsSubmitted.length}/${view.players.length})`}
-            {view.phase === "playing" && sutda?.phase === "rejoin" && "구사 재경기 · 죽은 사람 참여 결정 중"}
-            {view.phase === "playing" && sutda && sutda.phase !== "rejoin" && `${sutda.rematchNo > 0 ? `재경기 ${sutda.rematchNo} · ` : ""}${sutda.phase === "bet1" ? "1차 베팅" : "2차 베팅"}`}
-            {view.phase === "playing" && poker?.phase === "choice" && `초이스 · 버릴 카드와 공개할 카드를 고르는 중 (${poker.chosen.length}/${poker.seats.length})`}
-            {view.phase === "playing" && poker?.phase === "bet" && `${poker.street}구${poker.street === 7 ? " (히든)" : ""} 베팅`}
-            {view.phase === "between" && "판이 끝났어요"}
-            {view.phase === "idle" && "2명 이상 앉으면 방장이 시작할 수 있어요"}
-          </p>
-          <div className="text-right">
-            <p className="text-xs text-muted">판돈</p>
-            <p className="font-display text-3xl text-accent">{pot.toLocaleString("ko-KR")}</p>
+      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_210px]">
+        <section className="stage flex min-h-0 flex-col gap-3 p-3 sm:p-4">
+          {/* 상태 · 판돈 · 남은 시간 */}
+          <div className="flex items-end justify-between gap-3">
+            <p className="text-sm text-muted">{status}</p>
+            <div className="text-right leading-none">
+              <p className="text-[11px] text-muted">판돈</p>
+              <p className="font-display text-3xl text-accent">{pot.toLocaleString("ko-KR")}</p>
+            </div>
           </div>
-        </div>
-        {remaining !== null && (
           <div
             className="h-1.5 overflow-hidden rounded bg-black/30"
             role="progressbar"
             aria-label="남은 시간"
             aria-valuemin={0}
             aria-valuemax={Math.round(totalMs / 1000)}
-            aria-valuenow={Math.ceil(remaining / 1000)}
+            aria-valuenow={remaining === null ? undefined : Math.ceil(remaining / 1000)}
+            aria-hidden={remaining === null}
           >
-            <div className="h-full bg-accent transition-[width]" style={{ width: `${Math.min(100, (remaining / totalMs) * 100)}%` }} />
+            {remaining !== null && (
+              <div className="h-full bg-accent transition-[width]" style={{ width: `${Math.min(100, (remaining / totalMs) * 100)}%` }} />
+            )}
           </div>
-        )}
 
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {view.seats.map((s) => {
-            const gs = gameSeat(s.userId);
-            const cards = game?.cards.filter((c) => c.ownerId === s.userId) ?? [];
-            const turn = game?.round.toActId === s.userId && game.phase !== "done" && game.phase !== "rejoin" && game.phase !== "choice";
-            const hand = result?.hands[s.userId];
-            const handLabel = hand ? ("label" in hand ? hand.label : hand.category) : undefined;
-            const won = result && (result.payouts[s.userId] ?? 0) > 0;
-            return (
-              <li
-                key={s.userId}
-                className={`rounded-xl border p-3 ${turn ? "border-accent bg-accent/10" : "border-line bg-black/20"} ${gs?.folded ? "opacity-50" : ""}`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="truncate font-bold">
-                    {s.username}
-                    {s.userId === me && <span className="ml-1 text-xs text-accent">(나)</span>}
+          {/* 다른 사람 자리 */}
+          <ul className="grid min-h-0 flex-1 auto-rows-min content-start gap-2 overflow-auto sm:grid-cols-2 xl:grid-cols-3">
+            {others.map((s) => {
+              const gs = gameSeat(s.userId);
+              const cards = game?.cards.filter((c) => c.ownerId === s.userId) ?? [];
+              const turn = isTurn(s.userId);
+              return (
+                <li
+                  key={s.userId}
+                  className={`rounded-xl border p-2.5 ${turn ? "border-accent bg-accent/10" : "border-line bg-black/20"} ${gs?.folded ? "opacity-60" : ""}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-sm font-bold">{s.username}</p>
+                    <span className="font-display">{s.stack.toLocaleString("ko-KR")}</span>
+                  </div>
+                  <div className="mt-1 flex min-h-5 flex-wrap gap-1 text-[11px]">{seatBadges(s.userId, turn)}</div>
+                  {/* 카드가 많으면(7포커) 한 줄에 겹쳐 펼친다 */}
+                  <div className="mt-1.5 flex min-h-[72px]">
+                    {cards.map((c, i) => (
+                      <div key={i} className={i === 0 ? "" : cards.length > 4 ? "-ml-6" : "ml-1"}>
+                        <Card card={c.card} small />
+                      </div>
+                    ))}
+                  </div>
+                </li>
+              );
+            })}
+            {others.length === 0 && <li className="text-sm text-muted">아직 다른 사람이 없어요. 방 주소를 친구에게 보내 주세요.</li>}
+          </ul>
+
+          {/* 판 결과 */}
+          {result && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-black/25 px-3 py-2 text-sm">
+              <p>
+                <b className="text-accent">{view.seats.find((s) => s.userId === result.winnerId)?.username ?? "누군가"} 승리</b>
+                {"splitAfterMaxRematches" in result && result.splitAfterMaxRematches && " · 재경기 3번 후 나눠 가짐"}
+                <span className="ml-2 text-muted">
+                  {Object.entries(result.payouts)
+                    .map(([id, amt]) => `${view.seats.find((s) => s.userId === id)?.username ?? id.slice(0, 6)} +${amt.toLocaleString("ko-KR")}P`)
+                    .join(" · ")}
+                </span>
+              </p>
+              {view.handId && (
+                <Link href={`/verify/${view.handId}`} className="text-accent underline">
+                  이 판 검증하기
+                </Link>
+              )}
+            </div>
+          )}
+
+          {/* 내 자리: 내 카드 크게 + 조작 */}
+          {mySeat ? (
+            <div
+              className={`rounded-xl border p-3 ${myTurn ? "border-accent bg-accent/10" : "border-gold-dim/60 bg-black/25"} ${myGameSeat?.folded ? "opacity-80" : ""}`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold">{mySeat.username}</span>
+                  <span className="text-xs text-accent">(나)</span>
+                  <div className="flex flex-wrap gap-1 text-[11px]">{seatBadges(me, isTurn(me))}</div>
+                </div>
+                <span className="font-display text-xl text-accent">{mySeat.stack.toLocaleString("ko-KR")}</span>
+              </div>
+
+              {choosing && poker ? (
+                <div className="mt-2 grid justify-items-center gap-2">
+                  <p className="text-sm">
+                    {pick.discard === null ? "버릴 카드를 누르세요" : pick.open === null ? "공개할 카드를 누르세요" : "이대로 할까요?"}
                   </p>
-                  <span className="font-display text-lg">{s.stack.toLocaleString("ko-KR")}</span>
+                  <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2">
+                    {poker.cards
+                      .filter((c) => c.ownerId === me && c.card !== null)
+                      .map((c) => (
+                        <button
+                          key={c.card}
+                          type="button"
+                          disabled={busy}
+                          aria-pressed={pick.discard === c.card || pick.open === c.card}
+                          onClick={() =>
+                            setPick((p) =>
+                              p.discard === null
+                                ? { discard: c.card, open: null }
+                                : p.open === null && p.discard !== c.card
+                                  ? { ...p, open: c.card }
+                                  : { discard: c.card, open: null },
+                            )
+                          }
+                        >
+                          <PlayingCard card={c.card} selected={pick.discard === c.card ? "버림" : pick.open === c.card ? "공개" : undefined} />
+                        </button>
+                      ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="btn-ghost px-4 py-2" disabled={busy} onClick={() => setPick(() => ({ discard: null, open: null }))}>
+                      다시 고르기
+                    </button>
+                    <button
+                      className="btn-main px-6 py-2"
+                      disabled={busy || pick.discard === null || pick.open === null}
+                      onClick={async () => {
+                        await run("choose", { discard: pick.discard, open: pick.open });
+                        setPick(() => ({ discard: null, open: null }));
+                      }}
+                    >
+                      확정
+                    </button>
+                  </div>
                 </div>
-                <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
-                  {bossId === s.userId && <Badge>보스</Badge>}
-                  {poker?.phase === "choice" && poker.chosen.includes(s.userId) && <Badge>고름</Badge>}
-                  {view.room.hostId === s.userId && <Badge>방장</Badge>}
-                  {turn && <Badge tone="accent">차례</Badge>}
-                  {gs?.folded && view.players.includes(s.userId) && <Badge>다이</Badge>}
-                  {gs?.allIn && !gs.folded && <Badge tone="accent">올인</Badge>}
-                  {s.status === "away" && <Badge>자리 비움</Badge>}
-                  {handLabel && <Badge tone={won ? "win" : undefined}>{handLabel}</Badge>}
+              ) : (
+                game &&
+                view.players.includes(me) && (
+                  <div className="mt-2 flex min-h-24 justify-center sm:min-h-32 lg:gap-2">
+                    {game.cards
+                      .filter((c) => c.ownerId === me)
+                      .map((c, i, all) => (
+                        // 데스크톱(lg) 전에는 5장 이상이면 겹쳐서 한 줄에 (360px 폭: 66 + 6×30 = 246px)
+                        <div key={i} className={i === 0 ? "" : all.length > 4 ? "-ml-9 lg:ml-0" : "ml-1.5 lg:ml-0"}>
+                          <Card card={c.card} />
+                        </div>
+                      ))}
+                  </div>
+                )
+              )}
+
+              {rejoin && rejoin.candidates.includes(me) && !rejoin.decided.includes(me) && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <p className="flex-1 text-sm">구사 재경기에 {rejoin.fee.toLocaleString("ko-KR")}P 내고 다시 들어갈까요?</p>
+                  <button className="btn-main px-5 py-2" disabled={busy} onClick={() => run("rejoin", { join: true })}>
+                    참여
+                  </button>
+                  <button className="btn-ghost px-5 py-2" disabled={busy} onClick={() => run("rejoin", { join: false })}>
+                    안 함
+                  </button>
                 </div>
-                <div className="mt-2 flex min-h-14 gap-1.5">
-                  {cards.map((c, i) => (
-                    <Card key={i} card={c.card} small />
+              )}
+
+              {/* 베팅 버튼은 모두 같은 모양 (다이도 같은 색) */}
+              {myTurn && (
+                <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-7">
+                  {view.legal.map((a) => (
+                    <button
+                      key={a}
+                      className="btn-main py-2.5 text-base"
+                      disabled={busy}
+                      onClick={() => run("act", { action: a, expectedSeq: view.seq })}
+                    >
+                      {ACTION_LABEL[a]}
+                    </button>
                   ))}
                 </div>
-              </li>
-            );
-          })}
-        </ul>
+              )}
 
-        {mySeat && game && view.phase === "playing" && !choosing && (
-          <div className="flex flex-wrap justify-center gap-2">
-            {game.cards
-              .filter((c) => c.ownerId === me)
-              .map((c, i) => (
-                <Card key={i} card={c.card} />
-              ))}
-          </div>
-        )}
-
-        {choosing && poker && (
-          <div className="grid justify-items-center gap-3">
-            <p className="text-sm">
-              {pick.discard === null ? "버릴 카드를 누르세요" : pick.open === null ? "공개할 카드를 누르세요" : "이대로 할까요?"}
-            </p>
-            <div className="flex gap-2">
-              {poker.cards
-                .filter((c) => c.ownerId === me && c.card !== null)
-                .map((c) => (
-                  <button
-                    key={c.card}
-                    type="button"
-                    disabled={busy}
-                    aria-pressed={pick.discard === c.card || pick.open === c.card}
-                    onClick={() =>
-                      setPick((p) =>
-                        p.discard === null
-                          ? { discard: c.card, open: null }
-                          : p.open === null && p.discard !== c.card
-                            ? { ...p, open: c.card }
-                            : { discard: c.card, open: null },
-                      )
-                    }
-                  >
-                    <PlayingCard card={c.card} selected={pick.discard === c.card ? "버림" : pick.open === c.card ? "공개" : undefined} />
+              <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                {error && (
+                  <p role="alert" className="mr-auto text-sm text-bust">
+                    {error}
+                  </p>
+                )}
+                {isHost && (view.phase === "idle" || view.phase === "between") && (
+                  <button className="btn-main px-5 py-2" disabled={busy} onClick={() => run("start")}>
+                    {view.phase === "between" ? "바로 다음 판" : "시작"}
                   </button>
-                ))}
+                )}
+                <button className="btn-ghost px-4 py-2 text-sm" disabled={busy || mySeat.status === "away"} onClick={() => run("stand")}>
+                  {mySeat.status === "away" ? "이번 판 끝나면 일어서요" : "일어서기"}
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button className="btn-ghost px-4 py-2" onClick={() => setPick(() => ({ discard: null, open: null }))}>
-                다시 고르기
-              </button>
-              <button
-                className="btn-main px-6 py-2"
-                disabled={busy || pick.discard === null || pick.open === null}
-                onClick={async () => {
-                  await run("choose", { discard: pick.discard, open: pick.open });
-                  setPick(() => ({ discard: null, open: null }));
-                }}
-              >
-                확정
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
-      {game && mySeat && <HandRanks game={view.room.game} myCards={game.cards.filter((c) => c.ownerId === me && c.card !== null).map((c) => c.card!)} />}
-      </div>
-
-      {result && (
-        <section className="panel mt-4 p-4">
-          <p className="font-bold text-accent">
-            {view.seats.find((s) => s.userId === result.winnerId)?.username ?? "누군가"} 승리
-            {"splitAfterMaxRematches" in result && result.splitAfterMaxRematches && " · 재경기 3번 후 나눠 가짐"}
-          </p>
-          <ul className="mt-2 text-sm text-muted">
-            {Object.entries(result.payouts).map(([id, amt]) => (
-              <li key={id}>
-                {view.seats.find((s) => s.userId === id)?.username ?? id.slice(0, 6)} +{amt.toLocaleString("ko-KR")}P
-              </li>
-            ))}
-          </ul>
-          {view.handId && (
-            <Link href={`/verify/${view.handId}`} className="mt-2 inline-block text-sm text-accent underline">
-              이 판 검증하기
-            </Link>
+          ) : (
+            view.room.status !== "closed" &&
+            view.seats.length < view.room.maxSeats && (
+              <div className="flex flex-wrap items-end gap-3 rounded-xl border border-gold-dim/60 bg-black/25 p-3">
+                <label className="flex flex-col gap-1 text-sm">
+                  가져갈 포인트 (최소 {minBuyIn.toLocaleString("ko-KR")}P)
+                  <input
+                    className="field w-40"
+                    type="number"
+                    min={minBuyIn}
+                    value={buyIn ?? minBuyIn * 5}
+                    onChange={(e) => setBuyIn(Number(e.target.value))}
+                  />
+                </label>
+                <button className="btn-main px-6 py-2.5" disabled={busy} onClick={() => run("sit", { buyIn: buyIn ?? minBuyIn * 5 })}>
+                  앉기
+                </button>
+              </div>
+            )
+          )}
+          {/* 앉기 패널이 사라져도(방이 찼을 때 등) 오류는 보이게 */}
+          {!mySeat && error && (
+            <p role="alert" className="text-sm text-bust">
+              {error}
+            </p>
           )}
         </section>
-      )}
 
-      <section className="mt-4 flex flex-wrap items-center gap-2">
-        {rejoin && rejoin.candidates.includes(me) && !rejoin.decided.includes(me) && (
-          <div className="panel flex w-full flex-wrap items-center gap-3 p-4">
-            <p className="flex-1">구사 재경기에 {rejoin.fee.toLocaleString("ko-KR")}P 내고 다시 들어갈까요?</p>
-            <button className="btn-main px-5 py-2" disabled={busy} onClick={() => run("rejoin", { join: true })}>
-              참여
-            </button>
-            <button className="btn-ghost px-5 py-2" disabled={busy} onClick={() => run("rejoin", { join: false })}>
-              안 함
-            </button>
-          </div>
+        {/* 족보: 데스크톱은 옆에(안에서만 스크롤), 모바일은 접어 둔다 */}
+        {game && mySeat && (
+          <>
+            <div className="hidden min-h-0 overflow-auto lg:block">
+              <HandRanks game={view.room.game} myCards={myCards} />
+            </div>
+            <details className="panel p-3 lg:hidden">
+              <summary className="cursor-pointer text-sm font-bold text-accent">
+                족보 보기{myLabel ? ` · 내 패: ${myLabel}` : ""}
+              </summary>
+              <div className="mt-2">
+                <HandRanks game={view.room.game} myCards={myCards} />
+              </div>
+            </details>
+          </>
         )}
-
-        {view.legal.length > 0 && (
-          <div className="flex w-full flex-wrap gap-2">
-            {view.legal.map((a) => (
-              <button
-                key={a}
-                className={`${a === "die" ? "btn-ghost" : "btn-main"} min-w-20 flex-1 py-3 text-lg`}
-                disabled={busy}
-                onClick={() => run("act", { action: a, expectedSeq: view.seq })}
-              >
-                {ACTION_LABEL[a]}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {!mySeat && view.room.status !== "closed" && view.seats.length < view.room.maxSeats && (
-          <div className="panel flex w-full flex-wrap items-end gap-3 p-4">
-            <label className="flex flex-col gap-1 text-sm">
-              가져갈 포인트 (최소 {minBuyIn.toLocaleString("ko-KR")}P)
-              <input
-                className="field w-40"
-                type="number"
-                min={minBuyIn}
-                value={buyIn ?? minBuyIn * 5}
-                onChange={(e) => setBuyIn(Number(e.target.value))}
-              />
-            </label>
-            <button className="btn-main px-6 py-2.5" disabled={busy} onClick={() => run("sit", { buyIn: buyIn ?? minBuyIn * 5 })}>
-              앉기
-            </button>
-          </div>
-        )}
-
-        {mySeat && isHost && (view.phase === "idle" || view.phase === "between") && (
-          <button className="btn-main px-6 py-2.5" disabled={busy} onClick={() => run("start")}>
-            {view.phase === "between" ? "바로 다음 판" : "시작"}
-          </button>
-        )}
-        {mySeat && (
-          <button className="btn-ghost px-4 py-2.5" disabled={busy || mySeat.status === "away"} onClick={() => run("stand")}>
-            {mySeat.status === "away" ? "이번 판 끝나면 일어서요" : "일어서기"}
-          </button>
-        )}
-      </section>
-
-      {error && (
-        <p role="alert" className="mt-3 text-sm text-bust">
-          {error}
-        </p>
-      )}
+      </div>
     </main>
   );
 }
 
-function Badge({ children, tone }: { children: React.ReactNode; tone?: "accent" | "win" }) {
-  const cls = tone === "accent" ? "border-accent text-accent" : tone === "win" ? "border-win text-win" : "border-line text-muted";
+function Badge({ children, tone }: { children: React.ReactNode; tone?: "accent" | "win" | "bust" }) {
+  const cls =
+    tone === "accent"
+      ? "border-accent text-accent"
+      : tone === "win"
+        ? "border-win text-win"
+        : tone === "bust"
+          ? "border-bust/70 text-bust"
+          : "border-line text-muted";
   return <span className={`rounded border px-1.5 py-0.5 ${cls}`}>{children}</span>;
 }

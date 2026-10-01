@@ -37,10 +37,10 @@ export const SUTDA_ROWS = [
 ];
 
 const SUTDA_SPECIALS: { name: string; desc: string }[] = [
-  { name: "암행어사", desc: "4·7 열끗 · 13·18광땡을 잡음 (평소 1끗)" },
-  { name: "땡잡이", desc: "3광·7 열끗 · 1~9땡을 잡음 (평소 망통)" },
-  { name: "구사", desc: "4·9 · 상대가 알리 이하면 재경기 (평소 3끗)" },
-  { name: "멍텅구리구사", desc: "4·9 열끗 · 상대가 9땡 이하면 재경기 (평소 3끗)" },
+  { name: "암행어사", desc: "4·7열끗, 13·18광땡 잡음" },
+  { name: "땡잡이", desc: "3광·7열끗, 1~9땡 잡음" },
+  { name: "구사", desc: "4·9, 알리 이하면 재경기" },
+  { name: "멍텅구리구사", desc: "4·9열끗, 9땡 이하면 재경기" },
 ];
 
 /** 섯다: 카드 2장의 족보 → 표의 행 이름 + 특수패 이름 */
@@ -75,7 +75,7 @@ function Row({ name, active, hint }: { name: string; active: boolean; hint?: str
     <li
       aria-current={active ? "true" : undefined}
       className={`flex items-center justify-between rounded px-2 transition-all ${
-        active ? "my-0.5 bg-accent py-1 text-sm font-bold text-[var(--accent-ink)] shadow" : "py-0.5 text-[11px] text-muted"
+        active ? "my-0.5 bg-accent py-0.5 text-sm font-bold text-[var(--accent-ink)] shadow" : "text-[11px] leading-[15px] text-muted"
       }`}
     >
       <span>{name}</span>
@@ -122,4 +122,13 @@ export function HandRanks({ game, myCards }: { game: "sutda" | "poker7"; myCards
       <p className="mt-2 text-[11px] text-muted">같은 족보면 숫자, 그다음 무늬(♠ ♦ ♥ ♣ 순)로 가려요.</p>
     </aside>
   );
+}
+
+/** 지금 내 패 이름 (모바일 접힌 족보 줄에 표시) */
+export function myHandLabel(game: "sutda" | "poker7", myCards: number[]): string | null {
+  if (game === "sutda") {
+    const pos = sutdaPosition(myCards);
+    return pos ? (pos.special ?? pos.row) : null;
+  }
+  return pokerPosition(myCards);
 }
