@@ -1,4 +1,4 @@
-// 섯다(2장) 진행 — card-games-rules.md "섯다" + rooms-arch.md 결정 3·4.
+// 섯다(2장·3장) 진행 — card-games-rules.md "섯다" + rooms-arch.md 결정 3·4 + sutda3-arch.md.
 // reduce는 순수 함수다. 덱은 판 생성 때 재경기분까지 미리 섞어 secrets에 둔다.
 import {
   applyAction,
@@ -15,11 +15,12 @@ import {
 } from "../betting";
 import { createRng, shuffle, type SeedEntry } from "../rng";
 import { maskCards, type HeldCard, type VisibleCard } from "../view";
-import { DECK_SIZE, evaluate, resolve, type SutdaCard, type SutdaHand } from "./hands";
+import { DECK_SIZE, evaluate, isSpecial, monthOf, resolve, type SutdaCard, type SutdaHand } from "./hands";
 
 export const MAX_REMATCHES = 3;
 
-export type SutdaPhase = "bet1" | "bet2" | "rejoin" | "done";
+/** 3장 섯다: open(공개할 1장 고름) → bet1 → pick(쓸 2장 고름) → bet2 */
+export type SutdaPhase = "open" | "bet1" | "pick" | "bet2" | "rejoin" | "done";
 
 export type SutdaResult = {
   payouts: Record<string, number>;
@@ -35,6 +36,12 @@ export type SutdaState = {
   baseBet: number;
   bossId: string;
   phase: SutdaPhase;
+  /** 없으면 2장 섯다 (예전 상태 호환) */
+  variant?: 2 | 3;
+  /** 3장 섯다 선택 단계에서 이미 정한 사람 (무엇을 골랐는지는 secrets에만) */
+  chosen?: string[];
+  /** 3장 섯다 쇼다운에서 각자 쓴 2장 */
+  used?: Record<string, [SutdaCard, SutdaCard]>;
   rematchNo: number;
   seats: Seat[];
   /** 이번 (재)경기 참가자. 재경기에서 빠진 사람은 여기 없다. */
@@ -57,6 +64,10 @@ export type SutdaState = {
     deckPos: number;
     /** 구사 재경기 참여 결정 (전원이 정할 때까지 비공개) */
     rejoinChoices?: Record<string, boolean>;
+    /** 3장 섯다: 공개할 카드 (전원이 정할 때까지) */
+    opens?: Record<string, SutdaCard>;
+    /** 3장 섯다: 쓸 2장 (쇼다운 전까지) */
+    picks?: Record<string, [SutdaCard, SutdaCard]>;
   };
 };
 
@@ -65,6 +76,8 @@ export type SutdaShowdown = {
   cards: HeldCard<SutdaCard>[];
   hands: Record<string, SutdaHand>;
   reasons: ("구사" | "동점")[];
+  /** 3장 섯다: 그 경기에서 각자 쓴 2장 */
+  used?: Record<string, [SutdaCard, SutdaCard]>;
 };
 
 export type SutdaAction =
@@ -72,7 +85,12 @@ export type SutdaAction =
   | { type: "timeout"; seatId: string }
   | { type: "rejoin"; seatId: string; join: boolean }
   /** 참여 결정 기한이 지나면 아직 안 정한 사람은 모두 불참 */
-  | { type: "rejoin_timeout" };
+  | { type: "rejoin_timeout" }
+  // 3장 섯다
+  | { type: "open"; seatId: string; card: SutdaCard }
+  | { type: "pick"; seatId: string; cards: [SutdaCard, SutdaCard] }
+  /** 선택 기한이 지나면 아직 안 정한 사람은 자동 선택 */
+  | { type: "choice_timeout" };
 
 export type SutdaRejoin = {
   /** 참여금 = 구사 팟 합계의 절반 (내림) */
@@ -86,6 +104,7 @@ export type SutdaRejoin = {
 
 export type CreateSutdaHand = {
   handId: string;
+  variant?: 2 | 3;
   baseBet: number;
   bossId: string;
   seats: { id: string; seatNo: number; stack: number }[];
@@ -105,6 +124,7 @@ export function sutdaDecks(p: Pick<CreateSutdaHand, "serverSeed" | "handId" | "s
 
 export function createSutdaHand(p: CreateSutdaHand, decks: SutdaCard[][] = sutdaDecks(p)): SutdaState {
   if (p.seats.length < 2 || p.seats.length > 6) throw new SutdaError("섯다는 2~6명");
+  if (p.variant !== undefined && p.variant !== 2 && p.variant !== 3) throw new SutdaError("variant must be 2 or 3");
   if (!p.seats.some((s) => s.id === p.bossId)) throw new SutdaError("boss not seated");
   if (!Number.isSafeInteger(p.baseBet) || p.baseBet < 1) throw new SutdaError("baseBet must be a positive integer");
   // 규칙: 판 시작 시 스택은 기본금 이상 (모자라면 이전 판 종료 때 자동으로 일어섬).
@@ -139,7 +159,84 @@ export function createSutdaHand(p: CreateSutdaHand, decks: SutdaCard[][] = sutda
     result: null,
     secrets: { decks, deckPos: 0 },
   };
+  // 3장 섯다: 보스부터 한 장씩 두 바퀴 → 공개할 카드 고르기
+  if (p.variant === 3) return startOpen(dealOne(dealOne({ ...base, variant: 3 })));
   return beginRound(dealOne(base));
+}
+
+const isThree = (state: SutdaState) => state.variant === 3;
+
+function startOpen(state: SutdaState): SutdaState {
+  return {
+    ...state,
+    phase: "open",
+    chosen: [],
+    used: undefined,
+    round: { ...state.round, toActId: null },
+    secrets: { ...state.secrets, opens: {}, picks: undefined },
+  };
+}
+
+const cardsOf = (state: SutdaState, id: string) => state.cards.filter((c) => c.ownerId === id).map((c) => c.card);
+
+/** [우리 규칙] 공개 시간 초과: 월이 낮은 카드, 같은 월이면 일반패 */
+function autoOpen(cards: readonly SutdaCard[]): SutdaCard {
+  return [...cards].sort((x, y) => monthOf(x) - monthOf(y) || Number(isSpecial(x)) - Number(isSpecial(y)))[0];
+}
+
+/** [우리 규칙] 조합 시간 초과: 평소 값이 가장 높은 조합, 같으면 (오름차순 정렬한) 조합의 사전순으로 앞선 것 */
+export function autoPick(cards: readonly SutdaCard[]): [SutdaCard, SutdaCard] {
+  const s = [...cards].sort((x, y) => x - y);
+  const combos: [SutdaCard, SutdaCard][] = [
+    [s[0], s[1]],
+    [s[0], s[2]],
+    [s[1], s[2]],
+  ];
+  let best = combos[0];
+  for (const c of combos) if (evaluate(c[0], c[1]).value > evaluate(best[0], best[1]).value) best = c;
+  return best;
+}
+
+function decideOpen(state: SutdaState, seatId: string, card: SutdaCard): SutdaState {
+  const chosen = state.chosen ?? [];
+  if (!liveIds(state).includes(seatId)) throw new SutdaError("not in this choice");
+  if (chosen.includes(seatId)) throw new SutdaError("already chose");
+  if (!cardsOf(state, seatId).includes(card)) throw new SutdaError("not your card");
+  const next: SutdaState = {
+    ...state,
+    chosen: [...chosen, seatId],
+    secrets: { ...state.secrets, opens: { ...state.secrets.opens, [seatId]: card } },
+  };
+  if (next.chosen!.length < liveIds(next).length) return next;
+  // 전원이 정하면 동시에 공개하고 1차 베팅
+  const opens = next.secrets.opens!;
+  const cards = next.cards.map((c) => (opens[c.ownerId] === c.card ? { ...c, faceUp: true } : c));
+  return beginRound({ ...next, cards, phase: "bet1", chosen: [], secrets: { ...next.secrets, opens: undefined } });
+}
+
+function decidePick(state: SutdaState, seatId: string, pair: readonly [SutdaCard, SutdaCard]): SutdaState {
+  const chosen = state.chosen ?? [];
+  if (!liveIds(state).includes(seatId)) throw new SutdaError("not in this choice");
+  if (chosen.includes(seatId)) throw new SutdaError("already chose");
+  const [a, b] = pair;
+  const mine = cardsOf(state, seatId);
+  if (a === b || !mine.includes(a) || !mine.includes(b)) throw new SutdaError("bad pick");
+  const next: SutdaState = {
+    ...state,
+    chosen: [...chosen, seatId],
+    secrets: { ...state.secrets, picks: { ...state.secrets.picks, [seatId]: [Math.min(a, b), Math.max(a, b)] } },
+  };
+  if (next.chosen!.length < liveIds(next).length) return next;
+  return beginRound({ ...next, phase: "bet2", chosen: [] });
+}
+
+function chooseTimeout(state: SutdaState): SutdaState {
+  const pending = liveIds(state).filter((id) => !(state.chosen ?? []).includes(id));
+  const open = state.phase === "open";
+  return pending.reduce(
+    (s, id) => (open ? decideOpen(s, id, autoOpen(cardsOf(s, id))) : decidePick(s, id, autoPick(cardsOf(s, id)))),
+    state,
+  );
 }
 
 function orderFromBoss(state: SutdaState, ids: readonly string[]): string[] {
@@ -177,13 +274,18 @@ function beginRound(state: SutdaState): SutdaState {
 
 function advance(state: SutdaState): SutdaState {
   if (liveIds(state).length <= 1 || state.phase === "bet2") return showdown(state);
+  if (isThree(state)) {
+    // 3번째 카드 → 쓸 2장 고르기 (고른 뒤 2차 베팅)
+    const dealt = dealOne(state);
+    return { ...dealt, phase: "pick", chosen: [], round: { ...dealt.round, toActId: null }, secrets: { ...dealt.secrets, picks: {} } };
+  }
   return beginRound(dealOne({ ...state, phase: "bet2" }));
 }
 
 function handsOf(state: SutdaState, ids: readonly string[]): Record<string, SutdaHand> {
   const out: Record<string, SutdaHand> = {};
   for (const id of ids) {
-    const mine = state.cards.filter((c) => c.ownerId === id).map((c) => c.card);
+    const mine = isThree(state) ? state.secrets.picks![id] : state.cards.filter((c) => c.ownerId === id).map((c) => c.card);
     out[id] = evaluate(mine[0], mine[1]);
   }
   return out;
@@ -191,8 +293,11 @@ function handsOf(state: SutdaState, ids: readonly string[]): Record<string, Sutd
 
 function showdown(state: SutdaState): SutdaState {
   const live = liveIds(state);
-  // 혼자 남아 이기면 패를 공개하지 않는다.
-  const cards = live.length > 1 ? state.cards.map((c) => (live.includes(c.ownerId) ? { ...c, faceUp: true } : c)) : state.cards;
+  const picks = state.secrets.picks ?? {};
+  // 혼자 남아 이기면 패를 공개하지 않는다. 3장 섯다는 고른 2장만 공개 (숨긴 채 버린 카드는 뒷면 그대로).
+  const reveal = (c: HeldCard<SutdaCard>) => live.includes(c.ownerId) && (!isThree(state) || picks[c.ownerId].includes(c.card));
+  const cards = live.length > 1 ? state.cards.map((c) => (reveal(c) ? { ...c, faceUp: true } : c)) : state.cards;
+  const used = isThree(state) && live.length > 1 ? Object.fromEntries(live.map((id) => [id, picks[id]])) : undefined;
   const pots: Pot[] = [...state.carried, ...(state.seats.some((s) => s.handContrib > 0) ? computePots(state.seats) : [])];
 
   const hands = live.length > 1 ? handsOf(state, live) : {};
@@ -233,7 +338,7 @@ function showdown(state: SutdaState): SutdaState {
   }
 
   if (pending.length === 0) {
-    return finish({ ...state, cards, mainWinnerId }, settled, hands, splitByLimit);
+    return finish({ ...state, cards, mainWinnerId, ...(used ? { used } : {}) }, settled, hands, splitByLimit);
   }
 
   // 재경기가 필요 없는 팟은 먼저 지급하고, 나머지는 새 패로 다시 겨룬다.
@@ -243,6 +348,7 @@ function showdown(state: SutdaState): SutdaState {
     cards: cards.filter((c) => c.faceUp),
     hands,
     reasons: [...reasons],
+    ...(used ? { used } : {}),
   };
   const pendingState: SutdaState = {
     ...state,
@@ -255,6 +361,8 @@ function showdown(state: SutdaState): SutdaState {
     mainWinnerId,
     history: [...state.history, record],
     round: { ...state.round, toActId: null },
+    // 3장 섯다: 지난 경기 선택은 재참여 결정 중 화면에 남지 않게 지운다 (history에 used로 남음)
+    ...(isThree(state) ? { secrets: { ...state.secrets, picks: undefined } } : {}),
   };
 
   // 구사 재경기: 이번 경기에서 다이한 사람도 구사 팟 판돈의 절반을 내면 들어올 수 있다 (동점 팟은 해당 없음).
@@ -288,16 +396,17 @@ function startRematch(state: SutdaState): SutdaState {
       acted: false,
     };
   });
-  return beginRound(
-    dealOne({
-      ...state,
-      phase: "bet1",
-      rematchNo: state.rematchNo + 1,
-      seats,
-      rejoin: null,
-      secrets: { ...state.secrets, deckPos: 0 },
-    }),
-  );
+  const base: SutdaState = {
+    ...state,
+    phase: "bet1",
+    rematchNo: state.rematchNo + 1,
+    seats,
+    rejoin: null,
+    secrets: { ...state.secrets, deckPos: 0 },
+  };
+  // 3장 섯다 재경기도 공개 선택부터 (지난 경기 선택/used는 지우고 history에만 남는다)
+  if (isThree(state)) return startOpen(dealOne(dealOne(base)));
+  return beginRound(dealOne(base));
 }
 
 /** 결정 내용은 전원이 정할 때까지 secrets에만 두고, 공개 상태에는 "누가 정했는지"만 남긴다. */
@@ -389,7 +498,14 @@ export function reduceSutda(state: SutdaState, action: SutdaAction): SutdaState 
     }
     throw new SutdaError("waiting for rejoin decisions");
   }
+  if (state.phase === "open" || state.phase === "pick") {
+    if (action.type === "open" && state.phase === "open") return decideOpen(state, action.seatId, action.card);
+    if (action.type === "pick" && state.phase === "pick") return decidePick(state, action.seatId, action.cards);
+    if (action.type === "choice_timeout") return chooseTimeout(state);
+    throw new SutdaError("waiting for choices");
+  }
   if (action.type === "rejoin" || action.type === "rejoin_timeout") throw new SutdaError("no rejoin in progress");
+  if (action.type === "open" || action.type === "pick" || action.type === "choice_timeout") throw new SutdaError("no choice in progress");
   if (state.round.toActId !== action.seatId) throw new SutdaError("not your turn");
   const bet: BetActionType =
     action.type === "bet"
@@ -402,10 +518,18 @@ export function reduceSutda(state: SutdaState, action: SutdaAction): SutdaState 
   return isRoundOver(round) ? advance(next) : next;
 }
 
-export type SutdaView = Omit<SutdaState, "secrets" | "cards"> & { cards: VisibleCard<SutdaCard>[] };
+export type SutdaView = Omit<SutdaState, "secrets" | "cards"> & {
+  cards: VisibleCard<SutdaCard>[];
+  /** 3장 섯다: 내가 확정한 공개 카드·쓸 2장 (본인 것만, 남의 선택은 어디에도 없다) */
+  myOpen?: SutdaCard | null;
+  myPick?: [SutdaCard, SutdaCard] | null;
+};
 
 export function viewSutda(state: SutdaState, viewerId: string | null): SutdaView {
-  const { secrets: _secrets, cards, ...rest } = state;
-  void _secrets;
-  return { ...rest, cards: maskCards(cards, viewerId) };
+  const { secrets, cards, ...rest } = state;
+  const mine =
+    isThree(state) && viewerId !== null
+      ? { myOpen: secrets.opens?.[viewerId] ?? null, myPick: secrets.picks?.[viewerId] ?? null }
+      : {};
+  return { ...rest, cards: maskCards(cards, viewerId), ...mine };
 }
