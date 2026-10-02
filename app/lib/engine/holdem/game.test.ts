@@ -257,6 +257,7 @@ describe("홀덤 퍼즈", () => {
         expect(++steps).toBeLessThan(400);
       }
       expect(s.seats.reduce((a2, x) => a2 + x.stack, 0)).toBe(total);
+      expect(s.seats.reduce((a2, x) => a2 + x.stack - x.startStack, 0)).toBe(0); // 손익 합 = 0
       if (Object.keys(s.result!.hands).length > 0) expect(s.board).toHaveLength(5);
       expect(replay(initial, reduceHoldem, log)).toEqual(s);
       const used = [...s.board, ...s.holes.map((x) => x.card)];

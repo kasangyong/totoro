@@ -4,6 +4,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import { replay } from "@/lib/engine/replay";
 import { autoClientSeed, commitOf, type SeedEntry } from "@/lib/engine/rng";
 import { blackjackDeck, createBlackjackHand, reduceBlackjack, type BlackjackAction } from "@/lib/engine/blackjack/game";
+import { createHoldemHand, holdemDeck, reduceHoldem, type HoldemAction } from "@/lib/engine/holdem/game";
 import { createPoker7Hand, poker7Deck, reducePoker7, type Poker7Action } from "@/lib/engine/poker7/game";
 import { createSutdaHand, reduceSutda, sutdaDecks, type SutdaAction } from "@/lib/engine/sutda/game";
 import { summarize } from "@/lib/rooms/games";
@@ -12,14 +13,14 @@ import { PlayingCard } from "@/app/rooms/[id]/playing-card";
 
 export type RevealedHand = {
   /** 초기 판에는 없음 → 섯다 */
-  game?: "sutda" | "sutda3" | "poker7" | "blackjack";
+  game?: "sutda" | "sutda3" | "poker7" | "blackjack" | "holdem";
   rngVersion: string;
   serverSeed: string;
   clientSeeds: { seeds: SeedEntry[]; autoSeeded: string[] };
   baseBet: number;
   bossId: string;
   seats: { id: string; seatNo: number; stack: number }[];
-  actionLog: (SutdaAction | Poker7Action | BlackjackAction)[];
+  actionLog: (SutdaAction | Poker7Action | BlackjackAction | HoldemAction)[];
 };
 
 type Check = { label: string; ok: boolean | null; detail: string };
@@ -65,6 +66,11 @@ export function VerifyHand(props: {
         const s = summarize(final);
         const detail = { hands: s.hands, dealer: "dealer" in s ? s.dealer : null };
         return { payouts: final.result!.deltas, detail, rematches: 0, decks: [blackjackDeck(params).slice(0, final.secrets.deckPos)], error: null };
+      }
+      if (revealed.game === "holdem") {
+        // 홀덤: bossId = 그 판 버튼. 덱은 실제로 쓴 카드(개인 카드 → 번·플랍 → 번·턴 → 번·리버)까지만
+        const final = replay(createHoldemHand(params), reduceHoldem, revealed.actionLog as HoldemAction[]);
+        return { payouts: final.result!.payouts, detail: null, rematches: 0, decks: [holdemDeck(params).slice(0, final.secrets.deckPos)], error: null };
       }
       if (revealed.game === "poker7") {
         const final = replay(createPoker7Hand(params), reducePoker7, revealed.actionLog as Poker7Action[]);
@@ -171,12 +177,12 @@ export function VerifyHand(props: {
 
       {(outcome.decks[0]?.length ?? 0) > 0 && (
         <div className="panel p-4">
-          <p className="mb-2 text-sm font-bold text-accent">{revealed.game === "blackjack" ? "쓴 카드 순서 (좌석 순 1장 → 딜러 오픈 → 좌석 순 1장 → 딜러 히든 → 받은 순서)" : revealed.game === "poker7" ? "덱 순서 (좌석 순으로 한 장씩 돌림)" : revealed.game === "sutda3"
+          <p className="mb-2 text-sm font-bold text-accent">{revealed.game === "holdem" ? "쓴 카드 순서 (버튼 왼쪽부터 개인 카드 두 바퀴 → 번·플랍 3장 → 번·턴 → 번·리버)" : revealed.game === "blackjack" ? "쓴 카드 순서 (좌석 순 1장 → 딜러 오픈 → 좌석 순 1장 → 딜러 히든 → 받은 순서)" : revealed.game === "poker7" ? "덱 순서 (좌석 순으로 한 장씩 돌림)" : revealed.game === "sutda3"
               ? "첫 경기 덱 순서 (보스부터 한 장씩 두 바퀴 → 1차 베팅 뒤 살아 있는 사람에게 한 장씩)"
               : "첫 경기 덱 순서 (앞에서부터 보스 기준으로 한 장씩 돌림)"}</p>
           <div className="flex flex-wrap gap-1">
             {outcome.decks[0].map((c, i) => (
-              revealed.game === "poker7" || revealed.game === "blackjack" ? <PlayingCard key={i} card={c} small /> : <HwatuCard key={i} card={c} small />
+              revealed.game === "poker7" || revealed.game === "blackjack" || revealed.game === "holdem" ? <PlayingCard key={i} card={c} small /> : <HwatuCard key={i} card={c} small />
             ))}
           </div>
         </div>

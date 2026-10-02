@@ -58,7 +58,7 @@ export default async function Lobby() {
             <span className="font-display text-2xl tracking-widest">POKER</span>
             <span className="text-sm text-muted">7포커</span>
           </div>
-          <p className="mt-2 text-sm text-muted">초이스 룰 세븐포커. 4장 받아 1장 버리고 1장 공개, 히든까지.</p>
+          <p className="mt-2 text-sm text-muted">세븐포커(초이스 룰) 또는 노리밋 텍사스 홀덤. 방 만들 때 방식을 골라요.</p>
         </Link>
         <Link href="/rooms" className="panel block p-5 transition hover:-translate-y-0.5">
           <div className="flex items-baseline justify-between">

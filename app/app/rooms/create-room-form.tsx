@@ -6,7 +6,7 @@ import { useState, type FormEvent } from "react";
 // 게임을 고르면 방식을 고른다 (sutda3-arch.md 결정 4). 값은 방 종류(rooms.game) 그대로.
 const FAMILIES = [
   { key: "sutda", label: "섯다", variants: [{ value: "sutda", label: "2장" }, { value: "sutda3", label: "3장" }] },
-  { key: "poker", label: "포커", variants: [{ value: "poker7", label: "세븐포커" }, { value: "holdem", label: "홀덤 (준비 중)", disabled: true }] },
+  { key: "poker", label: "포커", variants: [{ value: "poker7", label: "세븐포커" }, { value: "holdem", label: "홀덤" }] },
   { key: "blackjack", label: "블랙잭", variants: [{ value: "blackjack", label: "블랙잭" }] },
 ] as const;
 
@@ -64,7 +64,7 @@ export function CreateRoomForm() {
           방식
           <select className="field" value={game} onChange={(e) => setGame(e.target.value as typeof game)}>
             {variants.map((v) => (
-              <option key={v.value} value={v.value} disabled={"disabled" in v && v.disabled}>
+              <option key={v.value} value={v.value}>
                 {v.label}
               </option>
             ))}

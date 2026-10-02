@@ -12,6 +12,8 @@ export type HoldemMove = "fold" | "check" | "call" | "raise" | "allin";
 export type HoldemSeat = {
   id: string;
   seatNo: number;
+  /** 판 시작 스택 (결과 화면에서 손익 = stack − startStack) */
+  startStack: number;
   stack: number;
   /** 이번 판에 낸 금액 (팟 계산) */
   handContrib: number;
@@ -146,7 +148,7 @@ export function createHoldemHand(p: CreateHoldemHand, deck: PokerCard[] = holdem
     phase: "preflop",
     seats: [...p.seats]
       .sort((a, b) => a.seatNo - b.seatNo)
-      .map((s) => ({ id: s.id, seatNo: s.seatNo, stack: s.stack, handContrib: 0, streetContrib: 0, folded: false, allIn: false, acted: false })),
+      .map((s) => ({ id: s.id, seatNo: s.seatNo, startStack: s.stack, stack: s.stack, handContrib: 0, streetContrib: 0, folded: false, allIn: false, acted: false })),
     currentBet: 0,
     minRaise: p.baseBet,
     toActId: null,
@@ -203,10 +205,13 @@ function maxRaiseTo(s: HoldemSeat) {
   return s.streetContrib + s.stack;
 }
 
+/** 베팅 판단에 필요한 공개 정보만 (화면에서 view로도 부를 수 있게) */
+export type HoldemBetting = Pick<HoldemState, "phase" | "toActId" | "seats" | "currentBet" | "minRaise">;
+
 /** 지금 이 사람이 할 수 있는 수 */
-export function legalHoldem(state: HoldemState, seatId: string): HoldemMove[] {
+export function legalHoldem(state: HoldemBetting, seatId: string): HoldemMove[] {
   if (state.phase === "done" || state.toActId !== seatId) return [];
-  const s = seatOf(state, seatId);
+  const s = state.seats.find((x) => x.id === seatId)!;
   if (!canAct(s)) return [];
   const toCall = state.currentBet - s.streetContrib;
   const respond = state.seats.some((x) => x.id !== seatId && canAct(x));
@@ -217,9 +222,9 @@ export function legalHoldem(state: HoldemState, seatId: string): HoldemMove[] {
 }
 
 /** 레이즈(총액) 범위. 레이즈를 못 하면 null */
-export function raiseBounds(state: HoldemState, seatId: string): { min: number; max: number } | null {
+export function raiseBounds(state: HoldemBetting, seatId: string): { min: number; max: number } | null {
   if (!legalHoldem(state, seatId).includes("raise")) return null;
-  const s = seatOf(state, seatId);
+  const s = state.seats.find((x) => x.id === seatId)!;
   return { min: state.currentBet + state.minRaise, max: maxRaiseTo(s) };
 }
 

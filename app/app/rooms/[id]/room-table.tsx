@@ -7,6 +7,7 @@ import { gameLabel } from "@/lib/rooms/labels";
 import type { RoomView } from "@/lib/rooms/service";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { BjDealer, BjMine, BjOthers, BjResultLine, BjRules, totalLabel } from "./blackjack-stage";
+import { HdBoard, HdMine, HdOthers, HdRanks, HdResultLine, HdTags, myHoldemCategory, STREET_LABEL } from "./holdem-stage";
 import { HwatuCard } from "./hwatu-card";
 import { HandRanks, myHandLabel } from "./hand-ranks";
 import { PlayingCard } from "./playing-card";
@@ -153,6 +154,9 @@ export function RoomTable({ roomId }: { roomId: string }) {
   const game = view.game && view.game.game !== "blackjack" && view.game.game !== "holdem" ? view.game : null;
   const isBJ = view.room.game === "blackjack";
   const bj = view.game?.game === "blackjack" ? view.game : null;
+  const isHD = view.room.game === "holdem";
+  const hd = view.game?.game === "holdem" ? view.game : null;
+  const hdCategory = hd ? myHoldemCategory(hd, me) : null;
   const bjMine = bj?.seats.find((s) => s.id === me);
   // 내 점수: 스플릿했으면 손마다
   const bjTotal = bjMine?.hands.some((h) => h.cards.length > 0) ? bjMine.hands.map((h) => totalLabel(h.cards)).join(" / ") : null;
@@ -174,7 +178,9 @@ export function RoomTable({ roomId }: { roomId: string }) {
     ? game.seats.reduce((a, s) => a + s.handContrib, 0) + (sutda ? sutda.carried.reduce((a, p) => a + p.amount, 0) : 0)
     : bj && bj.phase !== "done"
       ? bj.seats.reduce((a, s) => a + s.committed, 0)
-      : 0;
+      : hd && hd.phase !== "done"
+        ? hd.seats.reduce((a, s) => a + s.handContrib, 0)
+        : 0;
   const bossId = sutda ? sutda.bossId : poker && poker.phase !== "choice" ? poker.round.bossId : null;
   const choosing = poker?.phase === "choice" && poker.seats.some((s) => s.id === me) && !poker.chosen.includes(me);
   // 선택은 판마다 새로 (다른 판에서 누른 카드가 남지 않게)
@@ -234,6 +240,8 @@ export function RoomTable({ roomId }: { roomId: string }) {
             ? `초이스 · 버릴 카드와 공개할 카드를 고르는 중 (${poker.chosen.length}/${poker.seats.length})`
             : view.phase === "playing" && poker?.phase === "bet"
               ? `${poker.street}구${poker.street === 7 ? " (히든)" : ""} 베팅`
+              : view.phase === "playing" && hd && hd.phase !== "done"
+                ? `${STREET_LABEL[hd.phase]} · ${view.seats.find((s) => s.userId === hd.toActId)?.username ?? ""} 차례`
               : view.phase === "playing" && bj?.phase === "bet"
                 ? `베팅 · 금액을 정하는 중 (${bj.seats.filter((s) => s.status !== "waiting").length}/${bj.seats.length})`
                 : view.phase === "playing" && bj?.phase === "play"
@@ -263,11 +271,12 @@ export function RoomTable({ roomId }: { roomId: string }) {
         {gs?.allIn && !gs.folded && <Badge tone="accent">올인</Badge>}
         {seat?.status === "away" && <Badge>자리 비움</Badge>}
         {handLabel && <Badge tone={won ? "win" : undefined}>{handLabel}</Badge>}
+        {hd && <HdTags game={hd} id={userId} />}
       </>
     );
   };
   const isTurn = (id: string) =>
-    bj ? bj.toAct?.seatId === id : game?.round.toActId === id && game.phase !== "done" && game.phase !== "rejoin" && game.phase !== "choice";
+    bj ? bj.toAct?.seatId === id : hd ? hd.toActId === id : game?.round.toActId === id && game.phase !== "done" && game.phase !== "rejoin" && game.phase !== "choice";
 
   return (
     // 데스크톱은 화면 높이에 딱 맞춘다 (스크롤 없이 한 화면). 모바일은 내용만큼 늘어나되 조작부는 아래에 붙는다.
@@ -313,7 +322,13 @@ export function RoomTable({ roomId }: { roomId: string }) {
           </div>
 
           {/* 다른 사람 자리 (블랙잭은 위에 딜러) */}
-          {isBJ ? (
+          {isHD ? (
+            // 데스크톱: 공용 카드 | 다른 사람들 한 줄
+            <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
+              {hd && (view.phase === "playing" || view.phase === "between") && <HdBoard game={hd} />}
+              <HdOthers view={view} game={hd} badges={seatBadges} />
+            </div>
+          ) : isBJ ? (
             // 데스크톱: 딜러 | 다른 사람들 한 줄 (세로 공간 절약)
             <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
               {bj && (view.phase === "playing" || view.phase === "between") && <BjDealer game={bj} />}
@@ -351,6 +366,16 @@ export function RoomTable({ roomId }: { roomId: string }) {
           )}
 
           {/* 판 결과 */}
+          {view.phase === "between" && hd?.result && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-black/25 px-3 py-2 text-sm">
+              <HdResultLine view={view} game={hd} />
+              {view.handId && (
+                <Link href={`/verify/${view.handId}`} className="text-accent underline">
+                  이 판 검증하기
+                </Link>
+              )}
+            </div>
+          )}
           {view.phase === "between" && bj?.result && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-black/25 px-3 py-2 text-sm">
               <BjResultLine view={view} game={bj} />
@@ -364,11 +389,11 @@ export function RoomTable({ roomId }: { roomId: string }) {
           {result && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-black/25 px-3 py-2 text-sm">
               <p>
-                <b className="text-accent">{view.seats.find((s) => s.userId === result.winnerId)?.username ?? "누군가"} 승리</b>
+                <b className="text-accent">{view.seats.find((s) => s.userId === result.winnerId)?.username ?? "나간 사람"} 승리</b>
                 {"splitAfterMaxRematches" in result && result.splitAfterMaxRematches && " · 재경기 3번 후 나눠 가짐"}
                 <span className="ml-2 text-muted">
                   {Object.entries(result.payouts)
-                    .map(([id, amt]) => `${view.seats.find((s) => s.userId === id)?.username ?? id.slice(0, 6)} +${amt.toLocaleString("ko-KR")}P`)
+                    .map(([id, amt]) => `${view.seats.find((s) => s.userId === id)?.username ?? "나간 사람"} +${amt.toLocaleString("ko-KR")}P`)
                     .join(" · ")}
                 </span>
               </p>
@@ -394,7 +419,9 @@ export function RoomTable({ roomId }: { roomId: string }) {
                 <span className="font-display text-xl text-accent">{mySeat.stack.toLocaleString("ko-KR")}</span>
               </div>
 
-              {bj ? (
+              {hd ? (
+                view.players.includes(me) && <HdMine key={`${view.handId}:${hd.phase}:${hd.currentBet}`} view={view} game={hd} busy={busy} run={run} />
+              ) : bj ? (
                 view.players.includes(me) && <BjMine key={view.handId} view={view} game={bj} busy={busy} run={run} />
               ) : s3Choosing && sutda3 ? (
                 <div className="mt-2 grid justify-items-center gap-2">
@@ -496,7 +523,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
               )}
 
               {/* 베팅 버튼은 모두 같은 모양 (다이도 같은 색) */}
-              {myTurn && !bj && (
+              {myTurn && !bj && !hd && (
                 <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-7">
                   {view.legal.map((a) => (
                     <button
@@ -567,6 +594,19 @@ export function RoomTable({ roomId }: { roomId: string }) {
               </summary>
               <div className="mt-2">
                 <HandRanks game={game.game} myCards={rankCards} />
+              </div>
+            </details>
+          </>
+        )}
+        {isHD && mySeat && (
+          <>
+            <div className="hidden min-h-0 overflow-auto lg:block">
+              <HdRanks category={hdCategory} />
+            </div>
+            <details className="panel p-3 lg:hidden">
+              <summary className="cursor-pointer text-sm font-bold text-accent">족보 보기{hdCategory ? ` · 내 패: ${hdCategory}` : ""}</summary>
+              <div className="mt-2">
+                <HdRanks category={null} />
               </div>
             </details>
           </>

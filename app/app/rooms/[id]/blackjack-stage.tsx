@@ -200,7 +200,8 @@ export function BjMine({ view, game, busy, run }: { view: RoomView; game: Blackj
 /** 판 결과 줄: 딜러 점수와 좌석별 손익 */
 export function BjResultLine({ view, game }: { view: RoomView; game: BlackjackView }) {
   const r = game.result!;
-  const name = (id: string) => view.seats.find((s) => s.userId === id)?.username ?? id.slice(0, 6);
+  // 판이 끝나며 자리를 떠난 사람(칩 부족 등)은 좌석 목록에 없다
+  const name = (id: string) => view.seats.find((s) => s.userId === id)?.username ?? "나간 사람";
   const dealer = r.dealerTotal === null ? "아무도 안 걸었어요" : game.dealer.cards.length === 2 && r.dealerTotal === 21 ? "딜러 블랙잭" : r.dealerTotal > 21 ? "딜러 버스트" : `딜러 ${r.dealerTotal}`;
   const deltas = Object.entries(r.deltas).filter(([id]) => game.seats.find((s) => s.id === id)?.status === "in");
   return (
