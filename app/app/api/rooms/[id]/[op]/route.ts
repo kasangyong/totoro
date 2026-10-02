@@ -7,6 +7,8 @@ const ACTIONS: readonly LegalAction[] = [
   "check", "ping", "call", "ddadang", "quarter", "half", "die",
   // 블랙잭
   "bet", "sit_out", "hit", "stand", "double", "split",
+  // 홀덤 (check·call은 위와 같은 값)
+  "fold", "raise", "allin",
 ];
 
 export async function POST(request: NextRequest, ctx: RouteContext<"/api/rooms/[id]/[op]">) {

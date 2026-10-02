@@ -11,6 +11,16 @@ import {
   type BlackjackView,
 } from "../engine/blackjack/game";
 import { handTotal } from "../engine/blackjack/hands";
+import {
+  createHoldemHand,
+  legalHoldem,
+  reduceHoldem,
+  viewHoldem,
+  type HoldemAction,
+  type HoldemMove,
+  type HoldemState,
+  type HoldemView,
+} from "../engine/holdem/game";
 import type { SeedEntry } from "../engine/rng";
 import {
   createPoker7Hand,
@@ -22,14 +32,14 @@ import {
 } from "../engine/poker7/game";
 import { createSutdaHand, reduceSutda, viewSutda, type SutdaAction, type SutdaState, type SutdaView } from "../engine/sutda/game";
 
-export const GAME_KINDS = ["sutda", "sutda3", "poker7", "blackjack"] as const;
+export const GAME_KINDS = ["sutda", "sutda3", "poker7", "blackjack", "holdem"] as const;
 export type GameKind = (typeof GAME_KINDS)[number];
 
-export type GameState = SutdaState | Poker7State | BlackjackState;
-export type GameAction = SutdaAction | Poker7Action | BlackjackAction;
-export type GameView = SutdaView | Poker7View | BlackjackView;
-/** 상태 응답의 legal: 섯다·포커 베팅 액션, 또는 블랙잭 베팅·수 */
-export type LegalAction = BetActionType | "bet" | "sit_out" | BjMove;
+export type GameState = SutdaState | Poker7State | BlackjackState | HoldemState;
+export type GameAction = SutdaAction | Poker7Action | BlackjackAction | HoldemAction;
+export type GameView = SutdaView | Poker7View | BlackjackView | HoldemView;
+/** 상태 응답의 legal: 섯다·포커 베팅 액션, 블랙잭 베팅·수, 홀덤 수 (홀덤 fold는 섯다·포커 die와 별개 값) */
+export type LegalAction = BetActionType | "bet" | "sit_out" | BjMove | HoldemMove;
 
 export type CreateGame = {
   handId: string;
@@ -53,6 +63,9 @@ export function createGame(kind: GameKind, p: CreateGame): GameState {
       return createPoker7Hand(rest);
     case "blackjack":
       return createBlackjackHand(rest);
+    case "holdem":
+      // 홀덤은 bossId = 이번 판 버튼 (서비스가 좌석 번호로 돌린다)
+      return createHoldemHand(p);
   }
 }
 
@@ -65,6 +78,8 @@ export function reduceGame(state: GameState, action: GameAction): GameState {
       return reducePoker7(state, action as Poker7Action);
     case "blackjack":
       return reduceBlackjack(state, action as BlackjackAction);
+    case "holdem":
+      return reduceHoldem(state, action as HoldemAction);
   }
 }
 
@@ -76,6 +91,8 @@ export function viewGame(state: GameState, viewerId: string | null): GameView {
       return viewPoker7(state, viewerId);
     case "blackjack":
       return viewBlackjack(state);
+    case "holdem":
+      return viewHoldem(state, viewerId);
   }
 }
 
@@ -83,6 +100,7 @@ export function viewGame(state: GameState, viewerId: string | null): GameView {
 export function currentActor(state: GameState): string | null {
   if (state.phase === "done") return null;
   if (state.game === "blackjack") return state.toAct?.seatId ?? null;
+  if (state.game === "holdem") return state.toActId;
   if (state.game === "sutda" && (state.phase === "rejoin" || state.phase === "open" || state.phase === "pick")) return null;
   if (state.game === "poker7" && state.phase === "choice") return null;
   return state.round.toActId;
@@ -91,6 +109,7 @@ export function currentActor(state: GameState): string | null {
 /** 이 사람이 지금 할 수 있는 것 (초이스·재경기 참여는 각 API가 따로 검사) */
 export function legalFor(state: GameState, userId: string): LegalAction[] {
   if (state.game === "blackjack") return legalBlackjack(state, userId);
+  if (state.game === "holdem") return legalHoldem(state, userId);
   if (currentActor(state) !== userId) return [];
   return legalActions(state.seats, state.round, userId);
 }
@@ -159,6 +178,14 @@ export function summarize(state: GameState) {
         rematches: state.rematchNo,
       };
     case "poker7":
+      return {
+        payouts: state.result!.payouts,
+        winnerId: state.result!.winnerId as string | null,
+        hands: Object.fromEntries(Object.entries(state.result!.hands).map(([id, h]) => [id, h.category])) as Record<string, unknown>,
+        rematches: 0,
+      };
+    case "holdem":
+      // payouts = 받은 금액(콜 안 된 초과분·돌려받은 몫 포함), hands = 쇼다운한 사람의 족보 이름
       return {
         payouts: state.result!.payouts,
         winnerId: state.result!.winnerId as string | null,

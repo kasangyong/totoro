@@ -25,6 +25,9 @@ const ACTION_LABEL: Record<LegalAction, string> = {
   stand: "스탠드",
   double: "더블",
   split: "스플릿",
+  fold: "폴드",
+  raise: "레이즈",
+  allin: "올인",
 };
 
 const PHASE_LABEL: Record<string, string> = {
@@ -147,7 +150,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
   const me = view.me;
   const mySeat = view.seats.find((s) => s.userId === me);
   // 섯다·포커는 game, 블랙잭은 bj (블랙잭 무대는 blackjack-stage.tsx)
-  const game = view.game && view.game.game !== "blackjack" ? view.game : null;
+  const game = view.game && view.game.game !== "blackjack" && view.game.game !== "holdem" ? view.game : null;
   const isBJ = view.room.game === "blackjack";
   const bj = view.game?.game === "blackjack" ? view.game : null;
   const bjMine = bj?.seats.find((s) => s.id === me);

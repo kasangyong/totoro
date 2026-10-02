@@ -3,6 +3,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { BetActionType } from "../engine/betting";
 import type { BjMove } from "../engine/blackjack/game";
+import { raiseBounds, type HoldemMove } from "../engine/holdem/game";
 import { MAX_BET } from "../engine/solo/games";
 import { autoClientSeed, commitOf, isValidClientSeed, RNG_VERSION } from "../engine/rng";
 import type { PokerCard } from "../engine/poker7/hands";
@@ -63,6 +64,8 @@ export type RoomState = {
   /** 이번 판에 직접 액션한 사람 / 시간 초과 횟수 → 한 판 내내 응답 없으면 자동으로 일어섬 */
   voluntary: Record<string, boolean>;
   timeouts: Record<string, number>;
+  /** 홀덤: 직전 판 버튼의 좌석 번호 (다음 판은 그보다 큰 첫 좌석, holdem-arch 결정 1) */
+  buttonSeatNo?: number;
 };
 
 type RoomRow = {
@@ -195,6 +198,7 @@ export async function createRoom(
   if (game === "blackjack" && (input.baseBet < 10 || input.baseBet % 2 !== 0)) {
     throw new RoomError("블랙잭 기본금은 10P 이상 짝수예요.");
   }
+  if (game === "holdem" && input.baseBet < 2) throw new RoomError("홀덤 기본금(BB)은 2P 이상이에요.");
   const sql = engineDb();
   return sql.begin(async (tx) => {
     const [room] = await tx<{ id: string }[]>`
@@ -347,11 +351,13 @@ async function deal(ctx: Ctx) {
     select server_seed from private.hand_secrets where hand_id = ${handId}`;
   const playerSeats = ctx.seats.filter((x) => s.players.includes(x.user_id));
   const bossId =
-    s.bossId && s.players.includes(s.bossId)
-      ? s.bossId
-      : ctx.room.host_id && s.players.includes(ctx.room.host_id)
-        ? ctx.room.host_id
-        : playerSeats[0].user_id;
+    ctx.room.game === "holdem"
+      ? holdemButton(playerSeats, s.buttonSeatNo, ctx.room.host_id)
+      : s.bossId && s.players.includes(s.bossId)
+        ? s.bossId
+        : ctx.room.host_id && s.players.includes(ctx.room.host_id)
+          ? ctx.room.host_id
+          : playerSeats[0].user_id;
   const game = createGame(ctx.room.game, {
     handId,
     baseBet: ctx.room.base_bet,
@@ -376,6 +382,13 @@ async function deal(ctx: Ctx) {
     if (ctx.state.phase !== "playing") break;
     await applyGame(ctx, { type: "sit_out", seatId: x.user_id }, null);
   }
+}
+
+/** 홀덤 버튼: 직전 버튼 좌석보다 번호가 큰 첫 참가자 (없으면 처음으로). 첫 판은 방장, 없으면 가장 낮은 좌석. */
+function holdemButton(players: readonly SeatRow[], lastSeatNo: number | undefined, hostId: string | null): string {
+  const sorted = [...players].sort((a, b) => a.seat_no - b.seat_no);
+  if (lastSeatNo === undefined) return sorted.find((x) => x.user_id === hostId)?.user_id ?? sorted[0].user_id;
+  return (sorted.find((x) => x.seat_no > lastSeatNo) ?? sorted[0]).user_id;
 }
 
 async function applyGame(ctx: Ctx, action: GameAction, byUser: string | null) {
@@ -464,7 +477,12 @@ async function endHand(ctx: Ctx) {
   await ctx.tx`update public.hands set status = 'done', ended_at = now(),
                result = ${ctx.tx.json(result as never)}, revealed = ${ctx.tx.json(revealed as never)}
                where id = ${handId}`;
-  ctx.state = { ...s, phase: "between", bossId: result.winnerId ?? s.bossId };
+  ctx.state = {
+    ...s,
+    phase: "between",
+    bossId: result.winnerId ?? s.bossId,
+    ...(game.game === "holdem" ? { buttonSeatNo: game.seats.find((x) => x.id === game.buttonId)!.seatNo } : {}),
+  };
   emit(ctx, "hand_end", { handId, payouts: result.payouts });
 
   // 판이 끝나면 일어설 사람: 자리 비움 표시, 기본금보다 적은 스택, 한 판 내내 응답 없던 사람
@@ -486,6 +504,16 @@ export function act(userId: string, roomId: string, action: LegalAction, expecte
     const legal = ctx.state.phase === "playing" && game ? legalFor(game, userId) : [];
     if (!game || legal.length === 0) throw new RoomError("내 차례가 아니에요.", 409);
     if (!legal.includes(action)) throw new RoomError("지금 할 수 없는 액션이에요.");
+    if (game.game === "holdem") {
+      if (action === "raise") {
+        const b = raiseBounds(game, userId)!;
+        if (amount === undefined || !Number.isSafeInteger(amount) || amount < b.min || amount > b.max) {
+          throw new RoomError(`레이즈는 ${b.min.toLocaleString("ko-KR")}~${b.max.toLocaleString("ko-KR")}P 사이로 해 주세요.`);
+        }
+        return applyGame(ctx, { type: "act", seatId: userId, action, amount }, userId);
+      }
+      return applyGame(ctx, { type: "act", seatId: userId, action: action as HoldemMove }, userId);
+    }
     if (game.game !== "blackjack") {
       return applyGame(ctx, { type: "bet", seatId: userId, action: action as BetActionType }, userId);
     }

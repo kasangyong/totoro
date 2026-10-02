@@ -4,6 +4,7 @@ export const GAME_LABEL: Record<string, string> = {
   sutda3: "3장 섯다",
   poker7: "7포커",
   blackjack: "블랙잭",
+  holdem: "홀덤",
 };
 
 export const gameLabel = (kind: string) => GAME_LABEL[kind] ?? kind;
