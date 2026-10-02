@@ -22,7 +22,7 @@ import {
 } from "../engine/poker7/game";
 import { createSutdaHand, reduceSutda, viewSutda, type SutdaAction, type SutdaState, type SutdaView } from "../engine/sutda/game";
 
-export const GAME_KINDS = ["sutda", "poker7", "blackjack"] as const;
+export const GAME_KINDS = ["sutda", "sutda3", "poker7", "blackjack"] as const;
 export type GameKind = (typeof GAME_KINDS)[number];
 
 export type GameState = SutdaState | Poker7State | BlackjackState;
@@ -45,6 +45,8 @@ export function createGame(kind: GameKind, p: CreateGame): GameState {
   switch (kind) {
     case "sutda":
       return createSutdaHand(p);
+    case "sutda3":
+      return createSutdaHand({ ...p, variant: 3 });
     case "poker7":
       // 7포커는 판마다 오픈 카드로 보스를 정하므로 방의 보스를 쓰지 않는다.
       void bossId;
@@ -81,7 +83,7 @@ export function viewGame(state: GameState, viewerId: string | null): GameView {
 export function currentActor(state: GameState): string | null {
   if (state.phase === "done") return null;
   if (state.game === "blackjack") return state.toAct?.seatId ?? null;
-  if (state.game === "sutda" && state.phase === "rejoin") return null;
+  if (state.game === "sutda" && (state.phase === "rejoin" || state.phase === "open" || state.phase === "pick")) return null;
   if (state.game === "poker7" && state.phase === "choice") return null;
   return state.round.toActId;
 }
@@ -98,10 +100,13 @@ export function minPlayers(kind: GameKind): number {
 }
 
 /** 지금 무엇을 기다리는지 → 기한 길이와 시간 초과 액션이 정해진다 */
-export type WaitKind = "turn" | "rejoin" | "choice" | "bet";
+// 3장 섯다의 open·pick은 따로 둔다: open 뒤 1차 베팅이 바로 끝나 pick이 와도 기한을 새로 잡게 (sutda3-arch 결정 3)
+export type WaitKind = "turn" | "rejoin" | "choice" | "bet" | "open" | "pick";
 
 export function waitKind(state: GameState): WaitKind {
   if (state.game === "sutda" && state.phase === "rejoin") return "rejoin";
+  if (state.game === "sutda" && state.phase === "open") return "open";
+  if (state.game === "sutda" && state.phase === "pick") return "pick";
   if (state.game === "poker7" && state.phase === "choice") return "choice";
   if (state.game === "blackjack" && state.phase === "bet") return "bet";
   return "turn";
@@ -112,6 +117,8 @@ export function timeoutAction(state: GameState): GameAction {
     case "rejoin":
       return { type: "rejoin_timeout" };
     case "choice":
+    case "open":
+    case "pick":
       return { type: "choice_timeout" };
     case "bet":
       return { type: "bet_timeout" };
@@ -125,6 +132,11 @@ export function timedOutBy(state: GameState, action: GameAction): string[] {
   if (action.type === "timeout") return [action.seatId];
   if (action.type === "choice_timeout" && state.game === "poker7") {
     return state.seats.filter((x) => !state.chosen.includes(x.id)).map((x) => x.id);
+  }
+  if (action.type === "choice_timeout" && state.game === "sutda") {
+    return state.seats
+      .filter((x) => state.participants.includes(x.id) && !x.folded && !(state.chosen ?? []).includes(x.id))
+      .map((x) => x.id);
   }
   if (action.type === "bet_timeout" && state.game === "blackjack") {
     return state.seats.filter((x) => x.status === "waiting").map((x) => x.id);

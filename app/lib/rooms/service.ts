@@ -6,6 +6,7 @@ import type { BjMove } from "../engine/blackjack/game";
 import { MAX_BET } from "../engine/solo/games";
 import { autoClientSeed, commitOf, isValidClientSeed, RNG_VERSION } from "../engine/rng";
 import type { PokerCard } from "../engine/poker7/hands";
+import type { SutdaCard } from "../engine/sutda/hands";
 import { engineDb, type Tx } from "./db";
 import {
   createGame,
@@ -405,9 +406,13 @@ async function afterGameStep(ctx: Ctx, prevWait?: ReturnType<typeof waitKind>) {
   const game = ctx.state.game!;
   if (isDone(game)) return endHand(ctx);
   const wait = waitKind(game);
-  // 동시 선택(초이스·재경기 참여·블랙잭 베팅)은 한 사람이 정해도 모두의 기한이 그대로다
-  if (ctx.deadline && prevWait === wait && (wait === "choice" || wait === "rejoin" || wait === "bet")) return;
-  ctx.deadline = after(ctx, wait === "rejoin" ? REJOIN_MS : wait === "choice" ? CHOICE_MS : wait === "bet" ? BET_MS : TURN_MS);
+  // 동시 선택(초이스·재경기 참여·블랙잭 베팅·3장 섯다 공개·조합)은 한 사람이 정해도 모두의 기한이 그대로다
+  const simultaneous = wait === "choice" || wait === "rejoin" || wait === "bet" || wait === "open" || wait === "pick";
+  if (ctx.deadline && prevWait === wait && simultaneous) return;
+  ctx.deadline = after(
+    ctx,
+    wait === "rejoin" ? REJOIN_MS : wait === "choice" || wait === "open" || wait === "pick" ? CHOICE_MS : wait === "bet" ? BET_MS : TURN_MS,
+  );
 }
 
 async function endHand(ctx: Ctx) {
@@ -516,6 +521,32 @@ export function choose(userId: string, roomId: string, discard: PokerCard, open:
     }
     if (!game.seats.some((s) => s.id === userId) || game.chosen.includes(userId)) throw new RoomError("카드를 고를 수 없어요.", 409);
     await applyGame(ctx, { type: "choose", seatId: userId, discard, open }, userId);
+  });
+}
+
+/** 3장 섯다: 2장 중 공개할 1장 */
+export function openCard(userId: string, roomId: string, card: SutdaCard) {
+  return withRoom(roomId, async (ctx) => {
+    const game = ctx.state.game;
+    if (ctx.state.phase !== "playing" || game?.game !== "sutda" || game.phase !== "open") throw new RoomError("지금은 공개할 카드를 고를 때가 아니에요.", 409);
+    if (!game.participants.includes(userId) || (game.chosen ?? []).includes(userId)) throw new RoomError("카드를 고를 수 없어요.", 409);
+    if (!game.cards.some((c) => c.ownerId === userId && c.card === card)) throw new RoomError("내 카드가 아니에요.");
+    await applyGame(ctx, { type: "open", seatId: userId, card }, userId);
+  });
+}
+
+/** 3장 섯다: 3장 중 쓸 2장 */
+export function pickCards(userId: string, roomId: string, cards: [SutdaCard, SutdaCard]) {
+  return withRoom(roomId, async (ctx) => {
+    const game = ctx.state.game;
+    if (ctx.state.phase !== "playing" || game?.game !== "sutda" || game.phase !== "pick") throw new RoomError("지금은 쓸 카드를 고를 때가 아니에요.", 409);
+    const seat = game.seats.find((s) => s.id === userId);
+    if (!seat || seat.folded || !game.participants.includes(userId) || (game.chosen ?? []).includes(userId)) {
+      throw new RoomError("카드를 고를 수 없어요.", 409);
+    }
+    const mine = game.cards.filter((c) => c.ownerId === userId).map((c) => c.card);
+    if (cards[0] === cards[1] || !cards.every((c) => mine.includes(c))) throw new RoomError("내 카드 2장을 골라 주세요.");
+    await applyGame(ctx, { type: "pick", seatId: userId, cards }, userId);
   });
 }
 

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import type { LegalAction } from "@/lib/rooms/games";
 import { handle, readJson, requireUser } from "@/lib/rooms/http";
-import { act, choose, rejoin, RoomError, sit, stand, start, submitSeed, tick } from "@/lib/rooms/service";
+import { act, choose, openCard, pickCards, rejoin, RoomError, sit, stand, start, submitSeed, tick } from "@/lib/rooms/service";
 
 const ACTIONS: readonly LegalAction[] = [
   "check", "ping", "call", "ddadang", "quarter", "half", "die",
@@ -35,6 +35,15 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/rooms/[
         const { discard, open } = body;
         if (!Number.isInteger(discard) || !Number.isInteger(open)) throw new RoomError("카드를 골라 주세요.");
         return choose(userId, id, discard as number, open as number);
+      }
+      case "open": {
+        if (!Number.isInteger(body.card)) throw new RoomError("카드를 골라 주세요.");
+        return openCard(userId, id, body.card as number);
+      }
+      case "pick": {
+        const cards = body.cards;
+        if (!Array.isArray(cards) || cards.length !== 2 || !cards.every((c) => Number.isInteger(c))) throw new RoomError("카드 2장을 골라 주세요.");
+        return pickCards(userId, id, [cards[0] as number, cards[1] as number]);
       }
       case "tick":
         return tick(id);
