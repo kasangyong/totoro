@@ -12,7 +12,7 @@ import { PlayingCard } from "@/app/rooms/[id]/playing-card";
 
 export type RevealedHand = {
   /** 초기 판에는 없음 → 섯다 */
-  game?: "sutda" | "poker7" | "blackjack";
+  game?: "sutda" | "sutda3" | "poker7" | "blackjack";
   rngVersion: string;
   serverSeed: string;
   clientSeeds: { seeds: SeedEntry[]; autoSeeded: string[] };
@@ -70,7 +70,9 @@ export function VerifyHand(props: {
         const final = replay(createPoker7Hand(params), reducePoker7, revealed.actionLog as Poker7Action[]);
         return { payouts: final.result!.payouts, detail: null, rematches: 0, decks: [poker7Deck(params)], error: null };
       }
-      const final = replay(createSutdaHand(params), reduceSutda, revealed.actionLog as SutdaAction[]);
+      // 3장 섯다는 같은 엔진에 variant 3 (값이 없거나 "sutda"인 예전 판은 2장)
+      const sutdaParams = revealed.game === "sutda3" ? { ...params, variant: 3 as const } : params;
+      const final = replay(createSutdaHand(sutdaParams), reduceSutda, revealed.actionLog as SutdaAction[]);
       return { payouts: final.result!.payouts, detail: null, rematches: final.rematchNo, decks: sutdaDecks(params), error: null };
     } catch (e) {
       return { payouts: null, detail: null, rematches: 0, decks: [], error: e instanceof Error ? e.message : String(e) };
@@ -169,7 +171,9 @@ export function VerifyHand(props: {
 
       {(outcome.decks[0]?.length ?? 0) > 0 && (
         <div className="panel p-4">
-          <p className="mb-2 text-sm font-bold text-accent">{revealed.game === "blackjack" ? "쓴 카드 순서 (좌석 순 1장 → 딜러 오픈 → 좌석 순 1장 → 딜러 히든 → 받은 순서)" : revealed.game === "poker7" ? "덱 순서 (좌석 순으로 한 장씩 돌림)" : "첫 경기 덱 순서 (앞에서부터 보스 기준으로 한 장씩 돌림)"}</p>
+          <p className="mb-2 text-sm font-bold text-accent">{revealed.game === "blackjack" ? "쓴 카드 순서 (좌석 순 1장 → 딜러 오픈 → 좌석 순 1장 → 딜러 히든 → 받은 순서)" : revealed.game === "poker7" ? "덱 순서 (좌석 순으로 한 장씩 돌림)" : revealed.game === "sutda3"
+              ? "첫 경기 덱 순서 (보스부터 한 장씩 두 바퀴 → 1차 베팅 뒤 살아 있는 사람에게 한 장씩)"
+              : "첫 경기 덱 순서 (앞에서부터 보스 기준으로 한 장씩 돌림)"}</p>
           <div className="flex flex-wrap gap-1">
             {outcome.decks[0].map((c, i) => (
               revealed.game === "poker7" || revealed.game === "blackjack" ? <PlayingCard key={i} card={c} small /> : <HwatuCard key={i} card={c} small />

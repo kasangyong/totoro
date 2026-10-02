@@ -3,7 +3,7 @@
 - 작성일: 2026-09-30 (rev.2 — 평가 1차 "위험" 반영)
 - 관련: [product-brief](../product-brief.md) · [서비스 설계](betting-site-arch.md) · [게임 규칙](card-games-rules.md) · [HANDOFF §7](../../HANDOFF.md)
 - 규모 가정: 사용자 ≤10명, 동시 방 ≤3, 방당 ≤6명. 턴제라 초당 요청 수는 무시 가능.
-- 범위: 방 게임(섯다·7포커)에만 적용. 기존 8개 단판 게임은 서비스 설계 그대로 (통일 여부는 나중에 재검토).
+- 범위: 방 게임(2장·3장 섯다·7포커·블랙잭)에 적용. 3장 섯다는 [sutda3-arch.md](sutda3-arch.md), 블랙잭은 [blackjack-arch.md](blackjack-arch.md). 기존 8개 단판 게임은 서비스 설계 그대로 (통일 여부는 나중에 재검토).
 
 ## 서비스 설계 전역 원칙의 예외 (명문화)
 - **원칙 1 예외:** 방 게임은 Node(Route Handler) 트랜잭션 안에서 상태를 바꾼다. 단, **원장(ledger)·지갑(profiles)은 직접 쓰지 않고** `private.table_buyin(user, room, seat_session, amount)` / `private.table_cashout(user, room, seat_session, amount)` 함수 **호출만** 한다 (내부에서 `_apply_ledger` 사용 → 음수 검사·unique 유지).
@@ -147,7 +147,7 @@
 
 ## 결정 7. 방 생명주기
 
-- 방 만들기: 게임(`sutda` | `poker7`), 기본금, 최대 인원(2~6). **공개 방만** (친구 10명이라 비공개 코드 불필요, 코드 해시 역산 문제 회피).
+- 방 만들기: 게임 → 방식 (`sutda` 2장 · `sutda3` 3장 · `poker7` · `blackjack`, 홀덤은 다음 차례), 기본금, 최대 인원(2~6). **공개 방만** (친구 10명이라 비공개 코드 불필요, 코드 해시 역산 문제 회피).
 - 상태: `waiting` → (최소 인원 이상 착석 + 방장 시작) → `playing` → 전원 이탈·청소 시 `closed`.
 - 방장 이탈 시 좌석 번호가 가장 낮은 사람이 방장.
 - 중간 이탈: 자기 턴에 timeout 규칙 → 판 종료 시 일어섬·반환.

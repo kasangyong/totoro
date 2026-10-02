@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { gameLabel } from "@/lib/rooms/labels";
 import { supabaseServer } from "@/lib/supabase/server";
 import { CreateRoomForm } from "./create-room-form";
 
@@ -39,7 +40,7 @@ export default async function RoomsPage() {
                 <div>
                   <p className="font-bold">{r.name}</p>
                   <p className="text-xs text-muted">
-                    {r.game === "poker7" ? "7포커" : r.game === "blackjack" ? "블랙잭" : "섯다"} · 기본금 {r.base_bet.toLocaleString("ko-KR")}P · {r.status === "playing" ? "진행 중" : "대기 중"}
+                    {gameLabel(r.game)} · 기본금 {r.base_bet.toLocaleString("ko-KR")}P · {r.status === "playing" ? "진행 중" : "대기 중"}
                   </p>
                 </div>
                 <span className="font-display text-xl text-accent">

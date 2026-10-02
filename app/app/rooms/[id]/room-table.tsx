@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LegalAction } from "@/lib/rooms/games";
+import { gameLabel } from "@/lib/rooms/labels";
 import type { RoomView } from "@/lib/rooms/service";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { BjDealer, BjMine, BjOthers, BjResultLine, BjRules, totalLabel } from "./blackjack-stage";
@@ -53,6 +54,8 @@ export function RoomTable({ roomId }: { roomId: string }) {
   const [busy, setBusy] = useState(false);
   const [buyIn, setBuyIn] = useState<number | null>(null);
   /** 7포커 초이스: 먼저 누른 카드 = 버릴 카드, 다음 카드 = 공개할 카드 */
+  /** 3장 섯다: 고르는 중인 카드 (key = 판·재경기·단계) */
+  const [sutdaSel, setSutdaSel] = useState<{ key: string; cards: number[] }>({ key: "", cards: [] });
   const [pickState, setPickState] = useState<{ handId: string | null; discard: number | null; open: number | null }>({
     handId: null,
     discard: null,
@@ -157,7 +160,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
       ? 5000
       : view.game?.phase === "rejoin"
         ? 10000
-        : view.game?.phase === "choice" || bj?.phase === "bet"
+        : view.game?.phase === "choice" || bj?.phase === "bet" || view.game?.phase === "open" || view.game?.phase === "pick"
           ? 15000
           : 20000;
   const isHost = view.room.hostId === me;
@@ -180,8 +183,32 @@ export function RoomTable({ roomId }: { roomId: string }) {
   const minBuyIn = view.room.baseBet * 10;
   const result = view.phase === "between" && game?.result ? game.result : null;
 
+  // 3장 섯다: 공개할 1장(open) → 쓸 2장(pick). 고르는 중인 카드는 판마다 새로.
+  const sutda3 = sutda?.variant === 3 ? sutda : null;
+  const s3Live = !!sutda3 && sutda3.participants.includes(me) && !sutda3.seats.find((s) => s.id === me)?.folded;
+  const s3Choosing =
+    !!sutda3 && view.phase === "playing" && (sutda3.phase === "open" || sutda3.phase === "pick") && s3Live && !(sutda3.chosen ?? []).includes(me);
+  const s3Sel = sutdaSel.key === `${view.handId}:${sutda3?.rematchNo}:${sutda3?.phase}` ? sutdaSel.cards : [];
+  const toggleS3 = (card: number) => {
+    const key = `${view.handId}:${sutda3?.rematchNo}:${sutda3?.phase}`;
+    const need = sutda3?.phase === "open" ? 1 : 2;
+    const next = s3Sel.includes(card) ? s3Sel.filter((c) => c !== card) : need === 1 ? [card] : [...s3Sel, card].slice(-2);
+    setSutdaSel({ key, cards: next });
+  };
+  /** 3장 섯다 카드 표시: 내가 고른 공개 카드·쓸 2장은 이름표, 쇼다운 뒤 안 쓴 카드는 흐리게 */
+  const s3Mark = (ownerId: string, card: number | null): { selected?: string; dim?: boolean } => {
+    if (!sutda3 || card === null) return {};
+    const used = sutda3.used?.[ownerId];
+    if (used) return used.includes(card) ? {} : { dim: true };
+    if (ownerId === me && sutda3.myPick?.includes(card)) return { selected: "사용" };
+    if (ownerId === me && sutda3.myOpen === card) return { selected: "공개" };
+    return {};
+  };
+
   const myCards = game ? game.cards.filter((c) => c.ownerId === me && c.card !== null).map((c) => c.card!) : [];
-  const myLabel = game ? myHandLabel(game.game, myCards) : null;
+  // 족보 패널: 3장 섯다는 고른 2장이 있으면 그것, 아니면 가진 카드(3장이면 가능한 최고)
+  const rankCards = sutda3?.myPick ?? sutda3?.used?.[me] ?? myCards;
+  const myLabel = game ? myHandLabel(game.game, rankCards) : null;
   const myGameSeat = gameSeat(me);
   const myTurn = view.legal.length > 0;
   const others = view.seats.filter((s) => s.userId !== me);
@@ -191,7 +218,15 @@ export function RoomTable({ roomId }: { roomId: string }) {
       : view.phase === "playing" && sutda?.phase === "rejoin"
         ? "구사 재경기 · 죽은 사람 참여 결정 중"
         : view.phase === "playing" && sutda
-          ? `${sutda.rematchNo > 0 ? `재경기 ${sutda.rematchNo} · ` : ""}${sutda.phase === "bet1" ? "1차 베팅" : "2차 베팅"}`
+          ? `${sutda.rematchNo > 0 ? `재경기 ${sutda.rematchNo} · ` : ""}${
+              sutda.phase === "open"
+                ? `공개할 카드를 고르는 중 (${(sutda.chosen ?? []).length}/${sutda.seats.filter((s) => sutda.participants.includes(s.id) && !s.folded).length})`
+                : sutda.phase === "pick"
+                  ? `3장 중 쓸 2장을 고르는 중 (${(sutda.chosen ?? []).length}/${sutda.seats.filter((s) => sutda.participants.includes(s.id) && !s.folded).length})`
+                  : sutda.phase === "bet1"
+                    ? "1차 베팅"
+                    : "2차 베팅"
+            }`
           : view.phase === "playing" && poker?.phase === "choice"
             ? `초이스 · 버릴 카드와 공개할 카드를 고르는 중 (${poker.chosen.length}/${poker.seats.length})`
             : view.phase === "playing" && poker?.phase === "bet"
@@ -218,6 +253,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
       <>
         {bossId === userId && <Badge>보스</Badge>}
         {poker?.phase === "choice" && poker.chosen.includes(userId) && <Badge>고름</Badge>}
+        {sutda3 && (sutda3.phase === "open" || sutda3.phase === "pick") && (sutda3.chosen ?? []).includes(userId) && <Badge>고름</Badge>}
         {view.room.hostId === userId && <Badge>방장</Badge>}
         {turn && <Badge tone="accent">차례</Badge>}
         {gs?.folded && view.players.includes(userId) && <Badge tone="bust">다이</Badge>}
@@ -240,7 +276,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
         <div className="min-w-0 flex-1 text-center">
           <h1 className="truncate font-bold">{view.room.name}</h1>
           <p className="truncate text-xs text-muted">
-            {view.room.game === "poker7" ? "7포커" : isBJ ? "블랙잭" : "섯다"} · 기본금 {view.room.baseBet.toLocaleString("ko-KR")}P ·{" "}
+            {gameLabel(view.room.game)} · 기본금 {view.room.baseBet.toLocaleString("ko-KR")}P ·{" "}
             {view.handNo > 0 ? `${view.handNo}번째 판` : "첫 판 전"}
           </p>
         </div>
@@ -300,7 +336,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
                   <div className="mt-1.5 flex min-h-[72px]">
                     {cards.map((c, i) => (
                       <div key={i} className={i === 0 ? "" : cards.length > 4 ? "-ml-6" : "ml-1"}>
-                        <Card card={c.card} small />
+                        {sutda3 ? <HwatuCard card={c.card} small {...s3Mark(s.userId, c.card)} /> : <Card card={c.card} small />}
                       </div>
                     ))}
                   </div>
@@ -357,6 +393,33 @@ export function RoomTable({ roomId }: { roomId: string }) {
 
               {bj ? (
                 view.players.includes(me) && <BjMine key={view.handId} view={view} game={bj} busy={busy} run={run} />
+              ) : s3Choosing && sutda3 ? (
+                <div className="mt-2 grid justify-items-center gap-2">
+                  <p className="text-sm">
+                    {sutda3.phase === "open"
+                      ? "공개할 카드 1장을 누르세요"
+                      : s3Sel.length === 2
+                        ? `이 2장으로 할까요? · ${myHandLabel("sutda", s3Sel) ?? ""}`
+                        : "3장 중 쓸 2장을 누르세요"}
+                  </p>
+                  <div className="flex justify-center gap-1.5 sm:gap-2">
+                    {myCards.map((card) => (
+                      <button key={card} type="button" disabled={busy} aria-pressed={s3Sel.includes(card)} onClick={() => toggleS3(card)}>
+                        <HwatuCard card={card} selected={s3Sel.includes(card) ? (sutda3.phase === "open" ? "공개" : "사용") : undefined} />
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="btn-main px-6 py-2"
+                    disabled={busy || s3Sel.length !== (sutda3.phase === "open" ? 1 : 2)}
+                    onClick={async () => {
+                      await run(sutda3.phase, sutda3.phase === "open" ? { card: s3Sel[0] } : { cards: s3Sel });
+                      setSutdaSel({ key: "", cards: [] });
+                    }}
+                  >
+                    확정
+                  </button>
+                </div>
               ) : choosing && poker ? (
                 <div className="mt-2 grid justify-items-center gap-2">
                   <p className="text-sm">
@@ -410,7 +473,7 @@ export function RoomTable({ roomId }: { roomId: string }) {
                       .map((c, i, all) => (
                         // 데스크톱(lg) 전에는 5장 이상이면 겹쳐서 한 줄에 (360px 폭: 66 + 6×30 = 246px)
                         <div key={i} className={i === 0 ? "" : all.length > 4 ? "-ml-9 lg:ml-0" : "ml-1.5 lg:ml-0"}>
-                          <Card card={c.card} />
+                          {sutda3 ? <HwatuCard card={c.card} {...s3Mark(me, c.card)} /> : <Card card={c.card} />}
                         </div>
                       ))}
                   </div>
@@ -493,14 +556,14 @@ export function RoomTable({ roomId }: { roomId: string }) {
         {game && mySeat && (
           <>
             <div className="hidden min-h-0 overflow-auto lg:block">
-              <HandRanks game={game.game} myCards={myCards} />
+              <HandRanks game={game.game} myCards={rankCards} />
             </div>
             <details className="panel p-3 lg:hidden">
               <summary className="cursor-pointer text-sm font-bold text-accent">
-                족보 보기{myLabel ? ` · 내 패: ${myLabel}` : ""}
+                족보 보기{myLabel ? ` · ${rankCards.length === 3 ? "가능한 최고" : "내 패"}: ${myLabel}` : ""}
               </summary>
               <div className="mt-2">
-                <HandRanks game={game.game} myCards={myCards} />
+                <HandRanks game={game.game} myCards={rankCards} />
               </div>
             </details>
           </>

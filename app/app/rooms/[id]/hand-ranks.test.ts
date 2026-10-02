@@ -20,3 +20,16 @@ describe("족보 패널", () => {
     expect(CATEGORIES).toContain(pokerPosition([c(0, 2), c(1, 5), c(2, 9)]));
   });
 });
+
+describe("족보 패널 (3장 섯다)", () => {
+  const S = (m: number) => (m - 1) * 2;
+  const N = (m: number) => (m - 1) * 2 + 1;
+  it("shows the best ordinary combo of three cards and marks special hands that are possible", () => {
+    // 3광·7열끗·10일반: 최고는 7·10(7끗), 땡잡이(3광·7열끗)는 "가능"
+    expect(sutdaPosition([S(3), S(7), N(10)])).toEqual({ row: "7끗", special: null, best: true, possible: ["땡잡이"] });
+    // 4열끗·9열끗·4일반: 4땡이 최고, 멍텅구리구사·구사 가능
+    const p = sutdaPosition([S(4), S(9), N(4)])!;
+    expect(p.row).toBe("4땡");
+    expect(p.possible).toEqual(["구사", "멍텅구리구사"]);
+  });
+});

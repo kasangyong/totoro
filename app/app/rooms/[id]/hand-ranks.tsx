@@ -1,6 +1,7 @@
 "use client";
 
 import { bestHand, CATEGORIES, openCardsHand } from "@/lib/engine/poker7/hands";
+import { autoPick } from "@/lib/engine/sutda/game";
 import { evaluate } from "@/lib/engine/sutda/hands";
 
 /** 게임을 잘 몰라도 보이게: 족보를 낮은 것부터 작게 나열하고, 지금 내 패를 칠하고 키운다. */
@@ -43,9 +44,18 @@ const SUTDA_SPECIALS: { name: string; desc: string }[] = [
   { name: "멍텅구리구사", desc: "4·9열끗, 9땡 이하면 재경기" },
 ];
 
-/** 섯다: 카드 2장의 족보 → 표의 행 이름 + 특수패 이름 */
-export function sutdaPosition(cards: number[]): { row: string; special: string | null } | null {
+/** 섯다: 카드 2장의 족보 → 표의 행 이름 + 특수패 이름.
+ * 3장(3장 섯다, 아직 안 고름)이면 평소 값이 가장 높은 조합을 "가능한 최고"로 보고,
+ * 평소 값이 낮아 거기 안 나오는 특수패 4종은 만들 수 있으면 possible에 넣는다. */
+export function sutdaPosition(cards: number[]): { row: string; special: string | null; best?: boolean; possible?: string[] } | null {
   if (cards.length < 2) return null;
+  if (cards.length >= 3) {
+    const [a, b] = autoPick(cards.slice(0, 3));
+    const s = [...cards.slice(0, 3)].sort((x, y) => x - y);
+    const kinds = [evaluate(s[0], s[1]), evaluate(s[0], s[2]), evaluate(s[1], s[2])].map((h) => h.kind as string);
+    const possible = SUTDA_SPECIALS.map((x) => x.name).filter((n) => kinds.includes(n));
+    return { ...sutdaPosition([a, b])!, best: true, possible };
+  }
   const h = evaluate(cards[0], cards[1]);
   switch (h.kind) {
     case "38광땡":
@@ -92,7 +102,7 @@ export function HandRanks({ game, myCards }: { game: "sutda" | "poker7"; myCards
         <p className="mb-1 text-xs font-bold text-accent">족보 · 아래로 갈수록 강해요</p>
         <ol className="grid">
           {SUTDA_ROWS.map((r) => (
-            <Row key={r} name={r} active={pos?.row === r} hint={pos?.special ? `${pos.special}` : undefined} />
+            <Row key={r} name={r} active={pos?.row === r} hint={pos?.best ? "가능한 최고" : pos?.special ? `${pos.special}` : undefined} />
           ))}
         </ol>
         <p className="mt-2 mb-1 text-xs font-bold text-accent">특수패</p>
@@ -100,9 +110,16 @@ export function HandRanks({ game, myCards }: { game: "sutda" | "poker7"; myCards
           {SUTDA_SPECIALS.map((s) => (
             <li
               key={s.name}
-              className={`rounded px-2 py-0.5 ${pos?.special === s.name ? "bg-accent text-sm font-bold text-[var(--accent-ink)]" : "text-[11px] text-muted"}`}
+              className={`rounded px-2 py-0.5 ${
+                pos?.special === s.name && !pos.best
+                  ? "bg-accent text-sm font-bold text-[var(--accent-ink)]"
+                  : pos?.possible?.includes(s.name)
+                    ? "border border-accent text-[11px] text-accent"
+                    : "text-[11px] text-muted"
+              }`}
             >
               {s.name} <span className="opacity-80">· {s.desc}</span>
+              {pos?.possible?.includes(s.name) && <b className="ml-1">가능</b>}
             </li>
           ))}
         </ul>
